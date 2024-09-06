@@ -57,7 +57,11 @@ class LoggerAdapter(logging.LoggerAdapter):
 
         eg. logger.info("message", color_code=ColorCodes.GREEN)
         """
-        extra = self.extra or {}
+        # NOTE: LoggerAdapter.process() seems to ignore `extra` given to `kwargs` in a log call.
+        # (https://github.com/python/cpython/issues/76913)
+        # We will fix this behavior by explicitly merging it with the self.extra
+        # TODO: Switch to use the new `merge_extra=True` init option after Python 3.13
+        extra = (self.extra or {}) | (kwargs.get("extra") or {})
         for custom_arg in CustomLoggingArgs:
             if custom_arg in kwargs:
                 extra.update(**{custom_arg: kwargs.pop(custom_arg)})
