@@ -4,7 +4,6 @@ import inspect
 import json
 import time
 import urllib.parse
-from copy import deepcopy
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -190,7 +189,6 @@ def retry_on(
                         return resp
 
                     original_request: PreparedRequestExt = resp.request
-                    copied_request = deepcopy(original_request)
                     if callable(condition):
                         msg = "Retry condition matched."
                     else:
@@ -206,7 +204,7 @@ def retry_on(
                     )
                     time.sleep(retry_after)
                     resp = f(*args, **kwargs)
-                    original_request.retried = copied_request
+                    resp.request.retried = original_request
                     num_retried += 1
                 else:
                     break
