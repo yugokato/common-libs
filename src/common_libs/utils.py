@@ -1,4 +1,6 @@
+import keyword
 import os
+import re
 import sys
 import time
 from copy import deepcopy
@@ -109,6 +111,25 @@ def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bo
                 msg += format_line(line_msg)
 
         logger.info(f"\n{section}\n{msg}{section}", color_code=color_code)
+
+
+def clean_obj_name(name: str) -> str:
+    """Convert the name to a legal Python object name
+
+    - Illegal values will be converted to "_" (multiple illegal values in a row will be converted to single "_")
+    - If the name starts with a number, "_" will be added at the beginning
+
+    :param name: The original value
+    """
+    pattern_illegal_chars = r"\W+|^(?=\d)"
+    has_illegal_chars = re.search(pattern_illegal_chars, name)
+    is_reserved_name = keyword.iskeyword(name)
+    if has_illegal_chars:
+        name = re.sub(pattern_illegal_chars, "_", name)
+    elif is_reserved_name:
+        name = f"_{name}"
+
+    return name
 
 
 def wait_until(
