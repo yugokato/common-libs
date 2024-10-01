@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import redis
 
 from common_libs.decorators import singleton
@@ -19,12 +17,12 @@ class RedisClient:
         self.port = port
         self.user = user
         self.password = password
-        self._db: Optional[redis.Redis] = None
+        self._db: redis.Redis | None = None
 
         self.connect()
 
     @property
-    def db(self) -> Optional[redis.Redis]:
+    def db(self) -> redis.Redis | None:
         return self._db
 
     def connect(self):

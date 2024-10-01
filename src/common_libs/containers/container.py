@@ -3,9 +3,10 @@ import re
 import shlex
 import sys
 import tarfile
+from collections.abc import Callable
 from functools import cached_property, wraps
 from pathlib import Path
-from typing import Callable, Optional, Self, cast
+from typing import Self, cast
 
 import docker
 import docker.errors
@@ -123,7 +124,7 @@ class BaseContainer:
         self._container = None
 
     @property
-    def container(self) -> Optional[DockerdContainer | ContainerdContainer]:
+    def container(self) -> DockerdContainer | ContainerdContainer | None:
         """Return container object"""
         return self._container
 
@@ -136,7 +137,7 @@ class BaseContainer:
     def containerd(self) -> Containerd:
         """Accessor to the containerd runtime"""
         if not self.is_containerd:
-            raise ValueError(f"Not supported when is_containerd=False")
+            raise ValueError("Not supported when is_containerd=False")
         return Containerd()
 
     @requires_dockerd_runtime
@@ -182,12 +183,12 @@ class BaseContainer:
     def exec_run(
         self,
         cmd: str,
-        grep: Optional[str] = None,
-        grep_v: Optional[str] = None,
-        highlight: Optional[str] = None,
+        grep: str | None = None,
+        grep_v: str | None = None,
+        highlight: str | None = None,
         set_x: bool = False,
-        pipes: Optional[list[str]] = None,
-        timeout: Optional[int] = None,
+        pipes: list[str] | None = None,
+        timeout: int | None = None,
         ignore_error: bool = False,
         suppress_output: bool = False,
         quiet: bool = False,
@@ -196,7 +197,7 @@ class BaseContainer:
         stream: bool = False,
         detach: bool = False,
         **kwargs,
-    ) -> Optional[tuple[int, str]]:
+    ) -> tuple[int, str] | None:
         """Execute a command inside a container
 
         :param cmd: Command to execute
@@ -227,7 +228,7 @@ class BaseContainer:
             raise ValueError("stream option is not supported for containerd")
 
         if set_x:
-            cmd = f'date +"%Y-%m-%dT%H:%M:%S.%3N%z"; set -x; ' + cmd
+            cmd = 'date +"%Y-%m-%dT%H:%M:%S.%3N%z"; set -x; ' + cmd
         if grep:
             cmd += f' | GREP_COLOR="1;32" stdbuf -o0 grep -E "{self._escape_grep_pattern(grep)}" --color=always'
         elif highlight:
@@ -353,7 +354,7 @@ class BaseContainer:
 
         downloaded_file_path = Path(dest_dir_path, file_name)
         if extract_file:
-            logger.info(f"Extracting file...")
+            logger.info("Extracting file...")
             with tarfile.open(dest_gz_file_path, mode="r") as f:
                 f.extract(file_name, path=dest_dir_path)
             logger.info(f"Extracted: {downloaded_file_path}")

@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from select import poll
-from typing import Any, Iterator, Optional, Sequence
+from typing import Any
 
 import psycopg2
 import psycopg2.extensions
@@ -125,7 +126,7 @@ class PostgreSQLClient:
         self.password = password
         self.autocommit = autocommit
         self.statement_timeout = (statement_timeout_seconds or 0) * 1000
-        self._connection_pool: Optional[ThreadedConnectionPool] = None
+        self._connection_pool: ThreadedConnectionPool | None = None
 
         if connect:
             self.connect()
@@ -163,7 +164,7 @@ class PostgreSQLClient:
                 yield conn
 
     @contextmanager
-    def get_connection(self, existing_connection: Optional[Connection] = None) -> Iterator[Connection]:
+    def get_connection(self, existing_connection: Connection | None = None) -> Iterator[Connection]:
         """Get a connection from the connection pool, and return it to the pool at the end
 
         :param existing_connection: Existing connection to reuse
@@ -239,7 +240,7 @@ class PostgreSQLClient:
         self,
         query: str,
         vars: Sequence[Any] = None,
-        connection: Optional[Connection] = None,
+        connection: Connection | None = None,
         print_table: bool = False,
         logging: bool = False,
     ) -> list[dict[str, Any]]:
@@ -263,7 +264,7 @@ class PostgreSQLClient:
         self,
         query: str,
         vars: Sequence[Any] = None,
-        connection: Optional[Connection] = None,
+        connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
         """Execute DELETE query"""
@@ -283,7 +284,7 @@ class PostgreSQLClient:
         self,
         query: str,
         vars: Sequence[Any] = None,
-        connection: Optional[Connection] = None,
+        connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
         """Execute UPDATE query"""
@@ -303,7 +304,7 @@ class PostgreSQLClient:
         self,
         query: str,
         vars: Sequence[Any] = None,
-        connection: Optional[Connection] = None,
+        connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
         """Execute INSERT query"""
@@ -325,7 +326,7 @@ class PostgreSQLClient:
         columns_to_select: str | Sequence[str] = None,
         return_result: bool = False,
         **kwargs,
-    ) -> Optional[list[dict[str, Any]]]:
+    ) -> list[dict[str, Any]] | None:
         """Show tables"""
         if columns_to_select:
             if isinstance(columns_to_select, str):
@@ -403,7 +404,7 @@ def wait_select_inter(conn: Connection):
                 elif state in [POLL_READ, POLL_WRITE]:
                     poller.poll()
                 else:
-                    raise conn.OperationalError("bad state from poll: %s" % state)
+                    raise conn.OperationalError(f"bad state from poll: {state}")
             except KeyboardInterrupt:
                 conn.cancel()
                 # the loop will be broken by a server error

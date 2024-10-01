@@ -4,10 +4,11 @@ import inspect
 import json
 import time
 import urllib.parse
+from collections.abc import Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Callable, Optional, ParamSpec, Sequence, TypeVar
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
 from urllib.parse import parse_qs, urlparse
 
 from requests import Session
@@ -111,7 +112,7 @@ def process_response(
     return resp
 
 
-def parse_query_strings(url: str) -> Optional[dict[str, Any]]:
+def parse_query_strings(url: str) -> dict[str, Any] | None:
     """Parse query strings in the URL and return as a dictionary, if any"""
     q = urlparse(url)
     if q.query:
@@ -171,7 +172,7 @@ def retry_on(
         def matches_condition(r: RestResponse) -> bool:
             if isinstance(condition, int):
                 return r.status_code == condition
-            elif isinstance(condition, (tuple, list)) and all(isinstance(x, int) for x in condition):
+            elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
                 return r.status_code in condition
             elif callable(condition):
                 return condition(r)
@@ -245,7 +246,7 @@ def _decode_utf8(obj: Any):
 
 def _truncate(v: str | bytes) -> str | bytes:
     """Truncate value"""
-    assert isinstance(v, (str, bytes))
+    assert isinstance(v, str | bytes)
     trunc_pos = int(TRUNCATE_LEN / 2)
     trunc_mark = "   ...TRUNCATED...   "
     if isinstance(v, bytes):

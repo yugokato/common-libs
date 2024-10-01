@@ -1,5 +1,5 @@
-from collections.abc import Collection, Mapping
-from typing import Any, Callable
+from collections.abc import Callable, Collection, Mapping
+from typing import Any
 
 
 class HashableDict(dict):
@@ -20,7 +20,7 @@ def freeze(obj: Any) -> Any:
         return type(obj)(freeze(x) for x in obj)
     elif isinstance(obj, Mapping):
         return HashableDict({k: freeze(v) for k, v in obj.items()})
-    elif isinstance(obj, Collection) and not isinstance(obj, (str, bytes)):
+    elif isinstance(obj, Collection) and not isinstance(obj, str | bytes):
         return tuple(freeze(x) for x in obj)
     else:
         return obj

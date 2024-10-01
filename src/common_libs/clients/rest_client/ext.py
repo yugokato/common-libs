@@ -1,8 +1,9 @@
 import traceback
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Iterator, Optional, Union
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from requests import ConnectionError, PreparedRequest, ReadTimeout, Response, Session
 from requests.auth import AuthBase
@@ -34,9 +35,9 @@ class PreparedRequestExt(PreparedRequest):
     def __init__(self):
         super().__init__()
         self.request_id = str(uuid.uuid4())
-        self.start_time: Optional[datetime] = None
-        self.end_time: Optional[datetime] = None
-        self.retried: Optional["PreparedRequestExt"] = None
+        self.start_time: datetime | None = None
+        self.end_time: datetime | None = None
+        self.retried: PreparedRequestExt | None = None
 
 
 @dataclass
@@ -128,11 +129,11 @@ class SessionExt(Session):
             raise
 
     @retry_on(503, retry_after=15, safe_methods_only=True)
-    def _send(self, request: PreparedRequestExt, **kwargs) -> Union[Response, ResponseExt]:
+    def _send(self, request: PreparedRequestExt, **kwargs) -> Response | ResponseExt:
         """Send a request"""
-        request.start_time = datetime.now(tz=timezone.utc)
+        request.start_time = datetime.now(tz=UTC)
         dispatch_hook("request", request.hooks, request, **kwargs)
         try:
             return super().send(request, **kwargs)
         finally:
-            request.end_time = datetime.now(tz=timezone.utc)
+            request.end_time = datetime.now(tz=UTC)

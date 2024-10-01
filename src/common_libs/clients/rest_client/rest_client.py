@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 import requests.utils
 from requests.hooks import HOOKS
@@ -54,7 +54,7 @@ class RestClient:
         """
         return self._get(path, query=query_params, quiet=quiet)
 
-    def post(self, path: str, files: Optional[dict[str, Any]] = None, quiet: bool = False, **payload) -> RestResponse:
+    def post(self, path: str, files: dict[str, Any] | None = None, quiet: bool = False, **payload) -> RestResponse:
         """Make a POST API request
 
         :param path: Endpoint path
@@ -102,7 +102,7 @@ class RestClient:
 
     @manage_content_type
     def _get(
-        self, path: str, query: Optional[dict[str, Any]] = None, quiet: bool = False, **requests_lib_options
+        self, path: str, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
     ) -> RestResponse:
         """Low-level function of get()
 
@@ -125,8 +125,8 @@ class RestClient:
     def _post(
         self,
         path: str,
-        json: Optional[dict[str, Any] | list[Any]] = None,
-        query: Optional[dict[str, Any]] = None,
+        json: dict[str, Any] | list[Any] | None = None,
+        query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
     ) -> RestResponse:
@@ -153,7 +153,7 @@ class RestClient:
         self,
         path: str,
         json: dict[str, Any] | list[Any] = None,
-        query: Optional[dict[str, Any]] = None,
+        query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
     ) -> RestResponse:
@@ -180,7 +180,7 @@ class RestClient:
         self,
         path: str,
         json: dict[str, Any] | list[Any] = None,
-        query: Optional[dict[str, Any]] = None,
+        query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
     ) -> RestResponse:
@@ -207,7 +207,7 @@ class RestClient:
         self,
         path: str,
         json: dict[str, Any] | list[Any] = None,
-        query: Optional[dict[str, Any]] = None,
+        query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
     ) -> RestResponse:
@@ -231,7 +231,7 @@ class RestClient:
 
     @manage_content_type
     def _options(
-        self, path: str, query: Optional[dict[str, Any]] = None, quiet: bool = False, **requests_lib_options
+        self, path: str, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
     ) -> RestResponse:
         """Low-level function of options()
 
@@ -249,7 +249,7 @@ class RestClient:
         )
         return RestResponse(r)
 
-    def get_bearer_token(self) -> Optional[str]:
+    def get_bearer_token(self) -> str | None:
         """Get bear token in the current session"""
         if isinstance(self.session.auth, BearerAuth):
             return self.session.auth.token
@@ -266,7 +266,7 @@ class RestClient:
         """Unset bear token from the current session"""
         self.session.auth = None
 
-    def _generate_url(self, path: str, query: Optional[dict[str, Any]] = None):
+    def _generate_url(self, path: str, query: dict[str, Any] | None = None):
         if not path.startswith("/"):
             path = "/" + path
         url = f"{self.url_base}{path}"

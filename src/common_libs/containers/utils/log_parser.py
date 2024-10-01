@@ -1,7 +1,8 @@
 import json
 import re
 from collections import defaultdict
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from common_libs.ansi_colors import ColorCodes, color, remove_color_code
 from common_libs.logging import get_logger

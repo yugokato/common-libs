@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger

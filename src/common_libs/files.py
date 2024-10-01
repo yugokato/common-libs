@@ -2,10 +2,10 @@ import os
 import re
 import tarfile
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator
 
 
 def generate_filename(base_filename: str, add_msec: bool = True) -> str:

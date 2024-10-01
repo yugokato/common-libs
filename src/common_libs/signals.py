@@ -1,8 +1,8 @@
 import atexit
 import signal
+from collections.abc import Callable
 from functools import wraps
 from threading import current_thread, main_thread
-from typing import Callable
 
 
 def register_exit_handler(func: Callable, *func_args, **func_kwargs):

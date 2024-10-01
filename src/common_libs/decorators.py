@@ -1,7 +1,8 @@
 import inspect
+from collections.abc import Callable
 from functools import wraps
 from threading import RLock
-from typing import Any, Callable, ParamSpec, Type, TypeVar
+from typing import Any, ParamSpec, TypeVar
 from weakref import WeakValueDictionary
 
 from common_libs.hash import freeze, generate_hash
@@ -10,7 +11,7 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-def singleton(cls: Type[T]) -> Type[T]:
+def singleton(cls: type[T]) -> type[T]:
     """A decorator to make the decorated class to work as singleton.
 
     If the class takes arguments in __init__(), the same instance will be reused only when the instance attributes after
@@ -46,11 +47,11 @@ def singleton(cls: Type[T]) -> Type[T]:
     """
     orig_new = cls.__new__
     orig_init = cls.__init__
-    instances: WeakValueDictionary[tuple[Type[T], int], T] = WeakValueDictionary()
+    instances: WeakValueDictionary[tuple[type[T], int], T] = WeakValueDictionary()
     cls._lock = RLock()
 
     @wraps(orig_new)
-    def __new__(cls: Type[T], *args: Any, **kwargs: Any) -> T:
+    def __new__(cls: type[T], *args: Any, **kwargs: Any) -> T:
         sig = inspect.signature(orig_init)
         try:
             bound_args = sig.bind(cls, *args, **kwargs)
