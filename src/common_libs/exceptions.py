@@ -1,5 +1,4 @@
-class NotFound(Exception):
-    ...
+class NotFound(Exception): ...
 
 
 class CommandError(Exception):

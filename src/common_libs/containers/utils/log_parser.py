@@ -75,8 +75,7 @@ def parse_streamed_json_logs(logs: Iterator[bytes], filters: dict[str, Any] = No
     NOTE: Each chunk/log may contain color code(s)
     """
 
-    class LogUnmatched(Exception):
-        ...
+    class LogUnmatched(Exception): ...
 
     def parse_json_string_line(line: str):
         parsed_log: dict[str, Any] = json.loads(line, strict=False)
