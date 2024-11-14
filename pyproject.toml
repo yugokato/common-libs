@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "common-libs"
-description = "Shared libraries used by other repositories in https://github.com/yugokato"
+description = "Shared libraries used by other unpublished repositories in https://github.com/yugokato"
 readme = "README.md"
 license = {file="LICENSE"}
 authors = [

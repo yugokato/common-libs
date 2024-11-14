@@ -4,7 +4,7 @@ Common Libraries (common-libs)
 [![pre-commit.ci status](https://results.pre-commit.ci/badge/github/yugokato/common-libs/main.svg)](https://results.pre-commit.ci/latest/github/yugokato/common-libs/main)
 [![Code style ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 
-This repository contains some common Python libraries shared among my other private/public repositories.
+This repository contains some common Python libraries shared among my unpublished repositories.
 
 
 ## Installation
