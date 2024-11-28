@@ -111,7 +111,7 @@ class LogFormatter(logging.Formatter):
         """
         if datefmt:
             ct = self.converter(record.created)
-            datefmt = datefmt.replace("%f", "%03d" % int(record.msecs))
+            datefmt = datefmt.replace("%f", f"{int(record.msecs):03d}")
             datefmt = datefmt.replace("%z", time.strftime("%z"))
             return time.strftime(datefmt, ct)
         else:
