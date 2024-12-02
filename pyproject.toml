@@ -30,7 +30,7 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = [
-    "pre-commit==4.0.1",
+    "pre-commit>=3.0.0,<5",
     "ruff==0.8.0"
 ]
 test = [
@@ -39,7 +39,9 @@ test = [
     "pytest-mock>=3.14.0",
     "pytest-smoke",
     "pytest-subtests>=0.11.0",
-    "tox>=4.23.0"
+    "pytest-xdist[psutil]<4",
+    "tox>=4.0.0,<5",
+    "tox-uv>=1.0.0,<2"
 ]
 client = [
     "psycopg2-binary>=2.9.10",
