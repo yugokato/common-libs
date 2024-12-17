@@ -78,6 +78,9 @@ class RestResponse:
         """Return response as a generator. Use this when iterating a large response"""
         yield from self.response
 
+    def raise_for_status(self):
+        self._response.raise_for_status()
+
     def _process_response(self, response: ResponseExt):
         """Get json-encoded content of a response if possible, otherwise return content of the response."""
         return process_response(response)
