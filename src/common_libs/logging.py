@@ -25,7 +25,7 @@ def setup_logging(config_path: str | Path, delta_config_path: str | Path = None)
 
         with open(delta_config_path) as f:
             delta_log_cfg = yaml.safe_load(f)
-        log_cfg = merge_dicts(delta_log_cfg, log_cfg)
+        log_cfg = merge_dicts(log_cfg, delta_log_cfg)
 
     config.dictConfig(log_cfg)
 
