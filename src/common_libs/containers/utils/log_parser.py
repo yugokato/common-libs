@@ -102,30 +102,41 @@ def parse_streamed_json_logs(logs: Iterator[bytes], filters: dict[str, Any] = No
         return formatted_line
 
     buffered_lines = ""
+    buffered_chunks = b""
     for chunk in logs:
-        try:
-            if chunk.rstrip():
-                decoded_chunk = chunk.decode("utf-8")
-                for line in decoded_chunk.splitlines():
-                    try:
-                        line = parse_json_string_line(line)
-                    except json.decoder.JSONDecodeError:
-                        buffered_lines += line
-                    else:
-                        # To avoid accidentally keep buffering, clear buffer after the first successful JSON parsing
-                        buffered_lines = ""
-                        yield line
-            if buffered_lines:
+        if chunk.rstrip():
+            try:
+                decoded_chunk = (buffered_chunks + chunk).decode("utf-8")
+            except UnicodeDecodeError:
+                # The chunk is imcomplete
+                # TODO: Check if this handling is right
+                buffered_chunks += chunk
+                continue
+
+            buffered_chunks = b""
+            for line in decoded_chunk.splitlines():
                 try:
-                    line = parse_json_string_line(buffered_lines)
+                    line = parse_json_string_line(line)
                 except json.decoder.JSONDecodeError:
-                    # The buffered line is still incomplete as JSON. Will carry this over to the next chunk
+                    buffered_lines += line
+                except LogUnmatched:
                     pass
                 else:
+                    # To avoid accidentally keep buffering, clear buffer after the first successful JSON parsing
                     buffered_lines = ""
                     yield line
-        except LogUnmatched:
-            continue
+
+        if buffered_lines:
+            try:
+                line = parse_json_string_line(buffered_lines)
+            except json.decoder.JSONDecodeError:
+                # The buffered line is still incomplete as JSON. Will carry this over to the next chunk
+                pass
+            except LogUnmatched:
+                buffered_lines = ""
+            else:
+                buffered_lines = ""
+                yield line
 
 
 def does_log_match_filters(json_log: dict[str, Any], filters: dict[str, Any]) -> bool:
