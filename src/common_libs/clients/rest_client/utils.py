@@ -105,7 +105,7 @@ def process_response(
     try:
         resp = response.json()
         if prettify:
-            resp = json.dumps(resp, indent=4)
+            resp = json.dumps(resp, indent=4, ensure_ascii=False)
     except JSONDecodeError:
         resp = _decode_utf8(response.content)
 
