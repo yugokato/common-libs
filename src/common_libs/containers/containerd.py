@@ -29,7 +29,7 @@ class Containerd:
         self.containerd_sock = containerd_sock
         self.namespace = namespace
 
-    def get_containers(self, name: str = None) -> list[Container]:
+    def get_containers(self, name: str | None = None) -> list[Container]:
         """Get containers in the containerd runtime by container name
 
         :param name: Container name to filter

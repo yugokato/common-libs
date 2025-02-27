@@ -51,7 +51,7 @@ def parse_table_output(output: str) -> list[dict[str, str | None]]:
     table = []
     for line in table_data[1:]:
         # Output could contain some messages at the end. Ignore these lines
-        if not line or len(headers) > 1 and re.match(non_table_pattern, line):
+        if not line or (len(headers) > 1 and re.match(non_table_pattern, line)):
             logger.warning("Ignored non table data at the end of the output")
             break
 

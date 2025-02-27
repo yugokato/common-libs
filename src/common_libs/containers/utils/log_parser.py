@@ -1,7 +1,7 @@
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from typing import Any
 
 from common_libs.ansi_colors import ColorCodes, color, remove_color_code
@@ -10,7 +10,7 @@ from common_libs.logging import get_logger
 logger = get_logger(__name__)
 
 
-def parse_streamed_logs(logs: Iterator[bytes]) -> str:
+def parse_streamed_logs(logs: Iterator[bytes]) -> Generator[str, Any, None]:
     """Parse streamed logs and apply color based on the log level
 
     :param logs: A generator for streaming logs.
@@ -27,7 +27,7 @@ def parse_streamed_logs(logs: Iterator[bytes]) -> str:
                 yield line
 
 
-def parse_json_logs(logs: str, filters: dict[str, Any] = None, formatter: str = None) -> str:
+def parse_json_logs(logs: str, filters: dict[str, Any] | None = None, formatter: str | None = None) -> str:
     """Parse JSON string logs and apply color based on the log level
 
     :param logs: Original logs
@@ -61,7 +61,9 @@ def parse_json_logs(logs: str, filters: dict[str, Any] = None, formatter: str = 
     return "\n".join(lines)
 
 
-def parse_streamed_json_logs(logs: Iterator[bytes], filters: dict[str, Any] = None, formatter: str = None) -> str:
+def parse_streamed_json_logs(
+    logs: Iterator[bytes], filters: dict[str, Any] | None = None, formatter: str | None = None
+) -> Generator[str, Any, None]:
     """Parse streamed JSON logs. A color will be applied based on the log level
 
     A long output can be streamed as multiple lines in a chunk, or even in multiple chunks. We buffer incomplete
@@ -180,7 +182,7 @@ def does_log_match_filters(json_log: dict[str, Any], filters: dict[str, Any]) ->
             if not apply_filter(filter_k, filter_v, json_log):
                 return False
     except Exception as e:
-        logger.error(f"Encountered an error while applying a filter:\n{type(e).__name__}: {str(e)}", exc_info=e)
+        logger.error(f"Encountered an error while applying a filter:\n{type(e).__name__}: {e!s}", exc_info=e)
         return False
     return True
 
@@ -198,7 +200,7 @@ def _get_log_color(log_part: str) -> str:
     return color_code
 
 
-def _format_log(original_line: str, parsed_log: dict[str, Any], formatter: str = None):
+def _format_log(original_line: str, parsed_log: dict[str, Any], formatter: str | None = None):
     if formatter:
         try:
             formatted_line = formatter.format_map(parsed_log)

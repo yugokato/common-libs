@@ -11,7 +11,7 @@ import yaml
 from common_libs.ansi_colors import ColorCodes, color
 
 
-def setup_logging(config_path: str | Path, delta_config_path: str | Path = None) -> None:
+def setup_logging(config_path: str | Path, delta_config_path: str | Path | None = None) -> None:
     """Setup logging
 
     :param config_path: File path to a base logging config (.yaml)
@@ -104,7 +104,7 @@ class LogFilter(logging.Filter):
 
 
 class LogFormatter(logging.Formatter):
-    def formatTime(self, record: LogRecord, datefmt: str = None) -> str:
+    def formatTime(self, record: LogRecord, datefmt: str | None = None) -> str:
         """Overrides the default behavior to support both %f and %z in datefmt
 
         eg. datefmt="%Y-%m-%dT%H:%M:%S.%f%z" will display the timestamp as 2022-01-01T11:22:33.444-0000

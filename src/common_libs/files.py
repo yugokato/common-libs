@@ -33,7 +33,7 @@ def generate_temp_file(content: str | bytes, mode: str = "w") -> Iterator[Path]:
         yield Path(fp.name)
 
 
-def create_tar_file(file_path: Path | str, dest_dir_path: Path | str = None, mode: str = "gz") -> Path:
+def create_tar_file(file_path: Path | str, dest_dir_path: Path | str | None = None, mode: str = "gz") -> Path:
     """Create a tar archive in a specified directory, or temp directory if not specified"""
     if not dest_dir_path:
         dest_dir_path = Path(tempfile.mkdtemp())

@@ -107,9 +107,8 @@ def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bo
                 else:
                     msg += format_line(line_msg)
                     line_msg = f"{word} "
-            else:
-                # the last line
-                msg += format_line(line_msg)
+            # the last line
+            msg += format_line(line_msg)
 
         logger.info(f"\n{section}\n{msg}{section}", color_code=color_code)
 
@@ -135,10 +134,10 @@ def clean_obj_name(name: str) -> str:
 
 def wait_until(
     func: Callable,
-    func_args: tuple[Any] = None,
-    func_kwargs: dict[str, Any] = None,
+    func_args: tuple[Any] | None = None,
+    func_kwargs: dict[str, Any] | None = None,
     interval: float = 2,
-    stop_condition: Callable = None,
+    stop_condition: Callable | None = None,
     timeout: float = 30,
 ) -> Any:
     """Wait until the return value of the given polling function matches the expected condition, or raises a

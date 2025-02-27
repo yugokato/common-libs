@@ -152,7 +152,7 @@ class RestClient:
     def _delete(
         self,
         path: str,
-        json: dict[str, Any] | list[Any] = None,
+        json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
@@ -179,7 +179,7 @@ class RestClient:
     def _put(
         self,
         path: str,
-        json: dict[str, Any] | list[Any] = None,
+        json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,
@@ -206,7 +206,7 @@ class RestClient:
     def _patch(
         self,
         path: str,
-        json: dict[str, Any] | list[Any] = None,
+        json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
         **requests_lib_options,

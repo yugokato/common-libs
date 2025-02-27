@@ -43,7 +43,7 @@ def get_cursor_factory(client: PostgreSQLClient, logging: bool = False):
             super().__init__(*args, **kwargs)
             self.client = client
 
-        def execute(self, sql: str, vars: Sequence[Any] = None):
+        def execute(self, sql: str, vars: Sequence[Any] | None = None):
             client_name = self.client.name.capitalize()
             query = self.client._generate_query(self, sql, vars=vars)
             if logging:
@@ -56,7 +56,7 @@ def get_cursor_factory(client: PostgreSQLClient, logging: bool = False):
             except Exception as e:
                 logger.error(
                     f"Encountered an error during the query execution:\n"
-                    f"- Exception: {type(e).__name__}: {str(e)}\n"
+                    f"- Exception: {type(e).__name__}: {e!s}\n"
                     f"- Query: '{query}'"
                 )
                 raise
@@ -209,7 +209,7 @@ class PostgreSQLClient:
                             raise
 
     @contextmanager
-    def savepoint(self, connection: Connection, name: str = None, logging: bool = False):
+    def savepoint(self, connection: Connection, name: str | None = None, logging: bool = False):
         """Create a savepoint before query executions, and rollback to the savepoint if an error occurs
 
         NOTE: Use this when you run a large number of queries inside a transaction, and when you want to ignore some
@@ -239,7 +239,7 @@ class PostgreSQLClient:
     def SELECT(
         self,
         query: str,
-        vars: Sequence[Any] = None,
+        vars: Sequence[Any] | None = None,
         connection: Connection | None = None,
         print_table: bool = False,
         logging: bool = False,
@@ -255,7 +255,7 @@ class PostgreSQLClient:
                 cursor.execute(query, vars=vars)
                 rows = cursor.fetchall()
                 if print_table:
-                    print(tabulate.tabulate(rows, headers="keys", tablefmt="presto"))
+                    print(tabulate.tabulate(rows, headers="keys", tablefmt="presto"))  # noqa: T201
 
                 return [dict(x) for x in rows]
 
@@ -263,7 +263,7 @@ class PostgreSQLClient:
     def DELETE(
         self,
         query: str,
-        vars: Sequence[Any] = None,
+        vars: Sequence[Any] | None = None,
         connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
@@ -283,7 +283,7 @@ class PostgreSQLClient:
     def UPDATE(
         self,
         query: str,
-        vars: Sequence[Any] = None,
+        vars: Sequence[Any] | None = None,
         connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
@@ -303,7 +303,7 @@ class PostgreSQLClient:
     def INSERT(
         self,
         query: str,
-        vars: Sequence[Any] = None,
+        vars: Sequence[Any] | None = None,
         connection: Connection | None = None,
         logging: bool = True,
     ) -> int | tuple[Any, ...]:
@@ -322,8 +322,8 @@ class PostgreSQLClient:
     @check_connection
     def show_tables(
         self,
-        schema_names: str | Sequence[str] = None,
-        columns_to_select: str | Sequence[str] = None,
+        schema_names: str | Sequence[str] | None = None,
+        columns_to_select: str | Sequence[str] | None = None,
         return_result: bool = False,
         **kwargs,
     ) -> list[dict[str, Any]] | None:
@@ -368,7 +368,7 @@ class PostgreSQLClient:
         """Show user-defined function definition"""
         self.SELECT("SELECT prosrc FROM pg_proc WHERE proname=%s", vars=(func_name,), print_table=True)
 
-    def _generate_query(self, cursor: psycopg2.extensions.cursor, sql: str, vars: Sequence[Any] = None) -> str:
+    def _generate_query(self, cursor: psycopg2.extensions.cursor, sql: str, vars: Sequence[Any] | None = None) -> str:
         """Generates a query string after arguments binding"""
         try:
             query = cursor.mogrify(sql, vars).decode("utf-8").strip()
@@ -377,7 +377,7 @@ class PostgreSQLClient:
                 f"Failed to generate a query with given vars:\n"
                 f"- query: {sql}\n"
                 f"- vars: {vars}\n"
-                f"- Exception: {type(e)}\n{str(e)}"
+                f"- Exception: {type(e)}\n{e!s}"
             )
             raise
 

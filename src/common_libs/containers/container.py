@@ -93,8 +93,8 @@ class BaseContainer:
         self,
         image: str,
         tag: str = "latest",
-        name: str = None,
-        labels: dict[str, str] = None,
+        name: str | None = None,
+        labels: dict[str, str] | None = None,
         timeout: int = 60,
         is_containerd: bool = False,
         enable_automatic_recovery_on_404: bool = False,
@@ -192,7 +192,7 @@ class BaseContainer:
         ignore_error: bool = False,
         suppress_output: bool = False,
         quiet: bool = False,
-        output_parser: Callable = None,
+        output_parser: Callable | None = None,
         # raw parameters from <Container>.exec_run()
         stream: bool = False,
         detach: bool = False,
@@ -281,7 +281,7 @@ class BaseContainer:
                                     sys.stdout.write(line + "\n")
                                     sys.stdout.flush()
                 except KeyboardInterrupt:
-                    print("Stopped")
+                    print("Stopped")  # noqa: T201
             else:
                 if isinstance(resp, bytes):
                     try:
@@ -317,7 +317,7 @@ class BaseContainer:
 
     @requires_dockerd_runtime
     @requires_container
-    def upload_file(self, source_file_path: Path | str, dest_dir_path: str = None):
+    def upload_file(self, source_file_path: Path | str, dest_dir_path: str | None = None):
         """Upload a file to the container as a tar archive
 
         :param source_file_path: Local file path
