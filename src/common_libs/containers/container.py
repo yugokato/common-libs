@@ -230,9 +230,9 @@ class BaseContainer:
         if set_x:
             cmd = 'date +"%Y-%m-%dT%H:%M:%S.%3N%z"; set -x; ' + cmd
         if grep:
-            cmd += f' | GREP_COLOR="1;32" stdbuf -o0 grep -E "{self._escape_grep_pattern(grep)}" --color=always'
+            cmd += f' | GREP_COLORS="mt=1;32" stdbuf -o0 grep -E "{self._escape_grep_pattern(grep)}" --color=always'
         elif highlight:
-            cmd += f' | GREP_COLOR="1;32" stdbuf -o0 grep -E "{highlight}|$" --color=always'
+            cmd += f' | GREP_COLORS="mt=1;32" stdbuf -o0 grep -E "{highlight}|$" --color=always'
         if grep_v:
             cmd += f' | stdbuf -o0 grep -Ev "{self._escape_grep_pattern(grep_v)}"'
         if pipes:
