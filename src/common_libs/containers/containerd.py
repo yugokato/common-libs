@@ -14,6 +14,7 @@ from common_libs.exceptions import CommandError, NotFound
 from common_libs.logging import get_logger
 
 logger = get_logger(__name__)
+MAX_MESSAGE_LENGTH = 32 * 1024 * 1024  # 32MB
 
 
 class Containerd:
@@ -56,7 +57,13 @@ class Containerd:
         :param cmd: Command to execute
         :param raise_on_error: Raise RuntimeError when non-zero exit code is returned
         """
-        with grpc.insecure_channel(f"unix://{self.containerd_sock}") as channel:
+        with grpc.insecure_channel(
+            f"unix://{self.containerd_sock}",
+            options=[
+                ("grpc.max_send_message_length", MAX_MESSAGE_LENGTH),
+                ("grpc.max_receive_message_length", MAX_MESSAGE_LENGTH),
+            ],
+        ) as channel:
             runtime_stub = RuntimeServiceStub(channel)
             request = ExecSyncRequest(container_id=container_id, cmd=shlex.split(cmd))
             response: ExecSyncResponse = runtime_stub.ExecSync(request)
