@@ -30,8 +30,9 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 dev = [
-    "pre-commit>=3.0.0,<5",
-    "ruff"
+    "mypy>=1.15.0,<2",
+    "pre-commit>=4.0.0,<5",
+    "ruff",
 ]
 test = [
     "pytest>=8.0.0,<9",
