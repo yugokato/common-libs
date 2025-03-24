@@ -1,3 +1,4 @@
+import inspect
 import keyword
 import os
 import re
@@ -166,3 +167,71 @@ def wait_until(
         else:
             time.sleep(interval)
     raise TimeoutError(f"Waited for {timeout} seconds but the polling result did not match the expected condition")
+
+
+def is_decorator_with_args(decorator: Callable[..., Any]) -> bool:
+    """Check if the given decorator is a regular decorator or a decorator that takes arguments
+
+    :param decorator: A decorator function
+
+    eg.
+    >>> from functools import wraps
+    >>> def decorator(f):
+    >>>     @wraps(f)
+    >>>     def wrapper(*args, **kwargs):
+    >>>         return f(*args, **kwargs)
+    >>>     return wrapper
+    >>>
+    >>> def decorator_with_args(arg1, /, *, arg2, **kwargs):
+    >>>     def decorator(f):
+    >>>         @wraps(f)
+    >>>         def wrapper(*args, **kwargs):
+    >>>             return f(*args, **kwargs)
+    >>>         return wrapper
+    >>>     return decorator
+    >>>
+    >>> is_decorator_with_args(decorator)
+    False
+    >>> is_decorator_with_args(decorator_with_args)
+    True
+    """
+    dummy_orig_func_result = object()
+    dummy_orig_func = lambda *args, **kwargs: dummy_orig_func_result
+
+    def generate_callable_args(f: Callable[..., Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Generate callable args and kwargs that match with the given function's signature"""
+        args = []
+        kwargs = {}
+        sig_params = inspect.signature(f).parameters.values()
+        for i, p in enumerate(sig_params):
+            # generate fake args/kwargs to match with the function signature. If the signature has only one parameter,
+            # we always assume that it may be for the original function (if not, the value doesn't matter).
+            v = dummy_orig_func if len(sig_params) == 1 else "dummy_value"
+            match (p.name, p.kind):
+                case (_, p.POSITIONAL_OR_KEYWORD | p.POSITIONAL_ONLY | p.VAR_POSITIONAL):
+                    args.append(v)
+                case (param_name, p.KEYWORD_ONLY):
+                    kwargs[param_name] = v
+                case (_, p.VAR_KEYWORD):
+                    ...
+                case _:
+                    raise NotImplementedError(
+                        f"Unsupported signature parameter kind: {p.kind}. Please update this code"
+                    )
+        return tuple(args), kwargs
+
+    if callable(decorator):
+        # Get the decorator's wrapper function
+        deco_args, deco_kwargs = generate_callable_args(decorator)
+        wrapper_func = decorator(*deco_args, **deco_kwargs)
+        if getattr(wrapper_func, "__wrapped__", None) is dummy_orig_func:
+            # This is a regular decorator with @wraps(f) on the wrapper function. No need to look further
+            return False
+
+        # Call the wrapper function to see if the returned value is from the dummy function. If the decorator takes
+        # arugments, the returned value should be another wrapper function
+        wrapper_args, wrapper_kwargs = generate_callable_args(wrapper_func)
+        wrapper_func_result = wrapper_func(*wrapper_args, **wrapper_kwargs)
+        return wrapper_func_result is not dummy_orig_func_result
+    else:
+        return False
