@@ -224,6 +224,10 @@ def is_decorator_with_args(decorator: Callable[..., Any]) -> bool:
         # Get the decorator's wrapper function
         deco_args, deco_kwargs = generate_callable_args(decorator)
         wrapper_func = decorator(*deco_args, **deco_kwargs)
+        if not callable(wrapper_func):
+            # This is not a decorator
+            return False
+
         if getattr(wrapper_func, "__wrapped__", None) is dummy_orig_func:
             # This is a regular decorator with @wraps(f) on the wrapper function. No need to look further
             return False
