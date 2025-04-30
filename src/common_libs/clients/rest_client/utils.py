@@ -229,8 +229,8 @@ def retry_on(
 def get_supported_request_parameters() -> list[str]:
     """Return a list of supported request parameters"""
     custom_parameters = ["quiet", "query"]
-    requests_lib_params = inspect.signature(Session.request).parameters.keys()
-    return [x for x in requests_lib_params if x != "self"] + custom_parameters
+    requests_lib_params = inspect.signature(Session.request).parameters
+    return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
 
 
 def _decode_utf8(obj: Any):

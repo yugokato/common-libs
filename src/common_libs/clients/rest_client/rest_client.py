@@ -45,7 +45,7 @@ class RestClient:
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
 
-    def get(self, path: str, quiet: bool = False, **query_params) -> RestResponse:
+    def get(self, path: str, /, *, quiet: bool = False, **query_params) -> RestResponse:
         """Make a GET API request
 
         :param path: Endpoint path
@@ -54,7 +54,9 @@ class RestClient:
         """
         return self._get(path, query=query_params, quiet=quiet)
 
-    def post(self, path: str, files: dict[str, Any] | None = None, quiet: bool = False, **payload) -> RestResponse:
+    def post(
+        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload
+    ) -> RestResponse:
         """Make a POST API request
 
         :param path: Endpoint path
@@ -64,7 +66,7 @@ class RestClient:
         """
         return self._post(path, json=payload, files=files, quiet=quiet)
 
-    def delete(self, path: str, quiet: bool = False, **payload) -> RestResponse:
+    def delete(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
         """Make a DELETE API request
 
         :param path: Endpoint path
@@ -73,7 +75,7 @@ class RestClient:
         """
         return self._delete(path, json=payload, quiet=quiet)
 
-    def put(self, path: str, quiet: bool = False, **payload) -> RestResponse:
+    def put(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
         """Make a PUT API request
 
         :param path: Endpoint path
@@ -82,7 +84,7 @@ class RestClient:
         """
         return self._put(path, json=payload, quiet=quiet)
 
-    def patch(self, path: str, quiet: bool = False, **payload) -> RestResponse:
+    def patch(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
         """Make a PATCH API request
 
         :param path: Endpoint path
@@ -91,7 +93,7 @@ class RestClient:
         """
         return self._patch(path, json=payload, quiet=quiet)
 
-    def options(self, path: str, quiet: bool = False, **query_params) -> RestResponse:
+    def options(self, path: str, /, *, quiet: bool = False, **query_params) -> RestResponse:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
@@ -102,7 +104,7 @@ class RestClient:
 
     @manage_content_type
     def _get(
-        self, path: str, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
+        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
     ) -> RestResponse:
         """Low-level function of get()
 
@@ -125,6 +127,8 @@ class RestClient:
     def _post(
         self,
         path: str,
+        /,
+        *,
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
@@ -152,6 +156,8 @@ class RestClient:
     def _delete(
         self,
         path: str,
+        /,
+        *,
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
@@ -179,6 +185,8 @@ class RestClient:
     def _put(
         self,
         path: str,
+        /,
+        *,
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
@@ -206,6 +214,8 @@ class RestClient:
     def _patch(
         self,
         path: str,
+        /,
+        *,
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
@@ -231,7 +241,7 @@ class RestClient:
 
     @manage_content_type
     def _options(
-        self, path: str, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
+        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
     ) -> RestResponse:
         """Low-level function of options()
 
