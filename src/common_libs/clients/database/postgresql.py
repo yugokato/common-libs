@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import os
 import time
-import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from functools import wraps
-from select import poll
-from typing import Any
+from typing import Any, ParamSpec, TypeVar, cast
 
-import psycopg2
-import psycopg2.extensions
-import psycopg2.extras
+import psycopg
 import tabulate
-from psycopg2.extensions import POLL_OK, POLL_READ, POLL_WRITE
-from psycopg2.extensions import connection as Connection
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg import ClientCursor, Cursor
+from psycopg.abc import Query
+from psycopg.connection import Connection
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool, PoolClosed, PoolTimeout, TooManyRequests
 
 from common_libs.decorators import singleton
 from common_libs.logging import get_logger
 from common_libs.signals import register_exit_handler
+
+R = TypeVar("R")
+P = ParamSpec("P")
 
 logger = get_logger(__name__)
 
@@ -27,17 +28,11 @@ logger = get_logger(__name__)
 MAX_CONNECTIONS = 50
 
 
-def get_cursor_factory(client: PostgreSQLClient, logging: bool = False):
+def cursor_factory(client: PostgreSQLClient, logging: bool = False):
     """Returns a custom cursor factory"""
 
-    class Cursor(psycopg2.extras.RealDictCursor):
-        """Custom cursor that adds the following capabilities:
-
-        - Returns each row as a dictionary
-        - SQL query logging
-
-        https://www.psycopg.org/docs/advanced.html#connection-and-cursor-factories
-        """
+    class Cursor(ClientCursor):
+        """Custom cursor that adds ability to enable SQL query logging"""
 
         def __init__(self, client: PostgreSQLClient, *args, **kwargs):
             super().__init__(*args, **kwargs)
@@ -45,11 +40,13 @@ def get_cursor_factory(client: PostgreSQLClient, logging: bool = False):
 
         def execute(self, sql: str, vars: Sequence[Any] | None = None):
             client_name = self.client.name.capitalize()
+            if isinstance(vars, tuple):
+                vars = list(vars)
             query = self.client._generate_query(self, sql, vars=vars)
             if logging:
                 logger.debug(f"[{client_name}] {query}")
             try:
-                resp = super().execute(sql, vars=vars)
+                resp = super().execute(cast(Query, sql), vars)
                 if query.upper().startswith(("INSERT", "UPDATE", "DELETE")):
                     logger.debug(f"[{client_name}] Affected row count: {self.rowcount}")
                 return resp
@@ -67,16 +64,16 @@ def get_cursor_factory(client: PostgreSQLClient, logging: bool = False):
     return create_cursor
 
 
-def check_connection(f):
+def check_connection(f: Callable[P, R]) -> Callable[P, R]:
     @wraps(f)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs):
         self: PostgreSQLClient = args[0]
         if not kwargs.get("connection") or self._connection_pool is None:
             self.connect()
         try:
             return f(*args, **kwargs)
-        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
-            if any(err in str(e) for err in ["Operation timed out", "connection already closed", "EOF detected"]):
+        except (psycopg.OperationalError, psycopg.InterfaceError) as e:
+            if isinstance(e, PoolTimeout | PoolClosed) or "EOF detected" in str(e):
                 time.sleep(3)
                 logger.warning("Reconnecting...")
                 self.conn = None
@@ -124,9 +121,10 @@ class PostgreSQLClient:
         self.port = port
         self.user = user
         self.password = password
+        self.dsn = f"postgres://{self.user}:{self.password}@{self.host}:{self.port}/{self.db_name}"
         self.autocommit = autocommit
         self.statement_timeout = (statement_timeout_seconds or 0) * 1000
-        self._connection_pool: ThreadedConnectionPool | None = None
+        self._connection_pool: ConnectionPool | None = None
 
         if connect:
             self.connect()
@@ -135,16 +133,12 @@ class PostgreSQLClient:
         """Connect to database"""
         if self._connection_pool is None:
             logger.info(f"Connecting to {self.db_name.capitalize()} as '{self.user}': {self.host}:{self.port}")
-            self._connection_pool = ThreadedConnectionPool(
-                minconn=1,
-                maxconn=MAX_CONNECTIONS,
-                dbname=self.db_name,
-                user=self.user,
-                password=self.password,
-                host=self.host,
-                port=self.port,
-                connect_timeout=5,
-                options=f"-c statement_timeout={self.statement_timeout}",
+            self._connection_pool = ConnectionPool(
+                self.dsn,
+                min_size=1,
+                max_size=MAX_CONNECTIONS,
+                max_waiting=5,
+                kwargs=dict(options=f"-c statement_timeout={self.statement_timeout}"),
             )
             register_exit_handler(self.disconnect)
 
@@ -152,15 +146,17 @@ class PostgreSQLClient:
         """Disconnect from database"""
         if self._connection_pool is not None:
             logger.info(f"Disconnecting from {self.db_name.capitalize()}...")
-            self._connection_pool.closeall()
+            self._connection_pool.close()
             self._connection_pool = None
 
     @contextmanager
-    def transaction(self) -> Iterator[Connection]:
-        """Start a transaction"""
-        with self.get_connection() as conn:
-            # Since v2.9, autocommit is automatically ignored when connection is used with `with`
-            with conn:
+    def transaction(self, existing_onnection: Connection = None) -> Iterator[Connection]:
+        """Start a transaction
+
+        :param existing_onnection: Existing connection to reuse
+        """
+        with self.get_connection(existing_onnection) as conn:
+            with conn.transaction():
                 yield conn
 
     @contextmanager
@@ -174,66 +170,34 @@ class PostgreSQLClient:
         else:
             if self._connection_pool is None:
                 self.connect()
-            conn = None
             max_retry = 10
             count = 0
             while count < max_retry:
                 try:
-                    conn = self._connection_pool.getconn()
-                    break
-                except psycopg2.pool.PoolError as e:
+                    with self._connection_pool.connection() as conn:
+                        conn.set_autocommit(self.autocommit)
+                        yield conn
+                        break
+                except TooManyRequests:
                     if count + 1 == max_retry:
                         raise
                     else:
-                        if "connection pool exhausted" in str(e):
-                            logger.warning(f"Exceeded max connections ({MAX_CONNECTIONS}). Retrying...")
-                            time.sleep(1)
-                        else:
-                            raise
+                        logger.warning(f"Exceeded max connections ({MAX_CONNECTIONS}). Retrying...")
+                        time.sleep(1)
                 count += 1
 
-            assert conn
-            try:
-                if self.autocommit:
-                    conn.set_session(autocommit=True)
-                yield conn
-            finally:
-                if conn:
-                    try:
-                        conn.reset()
-                        self._connection_pool.putconn(conn)
-                    except psycopg2.pool.PoolError as e:
-                        if "trying to put unkeyed connection" in str(e):
-                            pass
-                        else:
-                            raise
-
     @contextmanager
-    def savepoint(self, connection: Connection, name: str | None = None, logging: bool = False):
-        """Create a savepoint before query executions, and rollback to the savepoint if an error occurs
+    def get_cursor(
+        self, connection: Connection, /, *, logging: bool = False, row_factory: Callable = dict_row
+    ) -> Iterator[Cursor]:
+        """Get a custom cursor for the given connection
 
-        NOTE: Use this when you run a large number of queries inside a transaction, and when you want to ignore some
-        errors that could be expected. You can stay inside the transaction even an error occurs in the middle.
-        Do NOT use this if all queries in the transaction must succeed.
-
-        :param connection: An existing connection in a transaction
-        :param name: Savepoint name
-        :param logging: Enable logging
+        :param connection: An existing connection to use
+        :param logging: Enable SQL query logging
+        :param: row_factory: Custom row factory to use for the cursor
         """
-        if not name:
-            name = f"savepoint_{str(uuid.uuid4()).replace('-', '_')}"
-        with self.get_connection(connection) as conn:
-            with conn.cursor(cursor_factory=get_cursor_factory(self, logging=logging)) as cursor:
-                cursor.execute(f"SAVEPOINT {name}")
-                try:
-                    yield
-                except AssertionError:
-                    raise
-                except Exception as e:
-                    logger.error(f"Encountered an error. Rolling back to the savepoint:\n{type(e)}: {e}")
-                    cursor.execute(f"ROLLBACK TO {name}")
-                else:
-                    cursor.execute(f"RELEASE savepoint {name}")
+        with cursor_factory(self, logging=logging)(connection, row_factory=row_factory) as cur:
+            yield cur
 
     @check_connection
     def SELECT(
@@ -251,12 +215,11 @@ class PostgreSQLClient:
             query = "SELECT " + query
 
         with self.get_connection(connection) as conn:
-            with conn.cursor(cursor_factory=get_cursor_factory(self, logging=logging)) as cursor:
-                cursor.execute(query, vars=vars)
+            with self.get_cursor(conn, logging=logging) as cursor:
+                cursor.execute(cast(Query, query), vars)
                 rows = cursor.fetchall()
                 if print_table:
                     print(tabulate.tabulate(rows, headers="keys", tablefmt="presto"))  # noqa: T201
-
                 return [dict(x) for x in rows]
 
     @check_connection
@@ -271,11 +234,11 @@ class PostgreSQLClient:
         if not query.strip().upper().startswith("DELETE"):
             query = "DELETE " + query
         with self.get_connection(connection) as conn:
-            with conn.cursor(cursor_factory=get_cursor_factory(self, logging=logging)) as cursor:
-                cursor.execute(query, vars=vars)
+            with self.get_cursor(conn, logging=logging) as cursor:
+                cursor.execute(cast(Query, query), vars)
                 if " RETURNING " in query.upper():
                     resp = cursor.fetchone()
-                    return tuple(resp.values())
+                    return next(iter(resp.values())) if len(resp) == 1 else tuple(resp.values())
                 else:
                     return cursor.rowcount
 
@@ -291,11 +254,11 @@ class PostgreSQLClient:
         if not query.strip().upper().startswith("UPDATE"):
             query = "UPDATE " + query
         with self.get_connection(connection) as conn:
-            with conn.cursor(cursor_factory=get_cursor_factory(self, logging=logging)) as cursor:
-                cursor.execute(query, vars=vars)
+            with self.get_cursor(conn, logging=logging) as cursor:
+                cursor.execute(cast(Query, query), vars)
                 if " RETURNING " in query.upper():
                     resp = cursor.fetchone()
-                    return tuple(resp.values())
+                    return next(iter(resp.values())) if len(resp) == 1 else tuple(resp.values())
                 else:
                     return cursor.rowcount
 
@@ -311,11 +274,11 @@ class PostgreSQLClient:
         if not query.strip().upper().startswith("INSERT"):
             query = "INSERT " + query
         with self.get_connection(connection) as conn:
-            with conn.cursor(cursor_factory=get_cursor_factory(self, logging=logging)) as cursor:
-                cursor.execute(query, vars=vars)
+            with self.get_cursor(conn, logging=logging) as cursor:
+                cursor.execute(cast(Query, query), vars)
                 if " RETURNING " in query.upper():
                     resp = cursor.fetchone()
-                    return tuple(resp.values())
+                    return next(iter(resp.values())) if len(resp) == 1 else tuple(resp.values())
                 else:
                     return cursor.rowcount
 
@@ -338,14 +301,14 @@ class PostgreSQLClient:
 
         sql = f"SELECT {columns} FROM pg_catalog.pg_tables WHERE schemaname"
         if schema_names:
-            sql += " IN %s"
+            sql += " = ANY(%s)"
             if isinstance(schema_names, str):
-                vars = (schema_names,)
+                vars = [schema_names]
             else:
-                vars = tuple(schema_names)
+                vars = [list(schema_names)]
         else:
-            sql += " NOT IN %s"
-            vars = ("pg_catalog", "information_schema", "public")
+            sql += " <> ALL(%s)"
+            vars = ["pg_catalog", "information_schema", "public"]
 
         # sort
         col_schema_name = "schemaname"
@@ -359,7 +322,7 @@ class PostgreSQLClient:
             else:
                 sql += col_table_name
 
-        tables = self.SELECT(sql, vars=(vars,), print_table=True, **kwargs)
+        tables = self.SELECT(sql, vars=[vars], print_table=True, **kwargs)
         if return_result:
             return tables
 
@@ -368,10 +331,10 @@ class PostgreSQLClient:
         """Show user-defined function definition"""
         self.SELECT("SELECT prosrc FROM pg_proc WHERE proname=%s", vars=(func_name,), print_table=True)
 
-    def _generate_query(self, cursor: psycopg2.extensions.cursor, sql: str, vars: Sequence[Any] | None = None) -> str:
+    def _generate_query(self, cursor: Cursor | ClientCursor, sql: str, vars: Sequence[Any] | None = None) -> str:
         """Generates a query string after arguments binding"""
         try:
-            query = cursor.mogrify(sql, vars).decode("utf-8").strip()
+            query = cursor.mogrify(cast(Query, sql), vars).strip()
         except Exception as e:
             logger.error(
                 f"Failed to generate a query with given vars:\n"
@@ -386,33 +349,15 @@ class PostgreSQLClient:
         return query
 
 
-def wait_select_inter(conn: Connection):
-    """Callback func for cancelling SQL statement on KeyboardInterrupt
+def customize_adapters():
+    """Customize psycopg adapters for specific types"""
+    # Dumpers
+    psycopg.adapters.register_dumper(dict, psycopg.types.json.JsonbDumper)
+    psycopg.adapters.register_dumper(set, psycopg.types.array.ListDumper)
 
-    The original code was copied from here: https://www.psycopg.org/articles/2014/07/20/cancelling-postgresql-statements-python/,
-    and then was modified to use poll() due to the limitation of FD_SETSIZE for select().
-    (https://man7.org/linux/man-pages/man2/select.2.html)
-    """
-    poller = poll()
-    poller.register(conn.fileno())
-    try:
-        while True:
-            try:
-                state = conn.poll()
-                if state == POLL_OK:
-                    break
-                elif state in [POLL_READ, POLL_WRITE]:
-                    poller.poll()
-                else:
-                    raise conn.OperationalError(f"bad state from poll: {state}")
-            except KeyboardInterrupt:
-                conn.cancel()
-                # the loop will be broken by a server error
-                continue
-    finally:
-        poller.unregister(conn.fileno())
+    # Loaders
+    psycopg.adapters.register_loader("uuid", psycopg.types.string.TextLoader)
+    psycopg.adapters.register_loader("numeric", psycopg.types.numeric.FloatLoader)
 
 
-psycopg2.extensions.set_wait_callback(wait_select_inter)
-# Automatically convert a Python object to a json/jsonb type when inserting (json.dumps() is no longer needed)
-psycopg2.extensions.register_adapter(dict, psycopg2.extras.Json)
+customize_adapters()
