@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TypeAlias
 
 from requests import ConnectionError, PreparedRequest, ReadTimeout, Response, Session
 from requests.auth import AuthBase
@@ -13,8 +13,7 @@ from common_libs.logging import get_logger
 
 from .utils import process_response, retry_on
 
-if TYPE_CHECKING:
-    JSONType = str | int | float | bool | None | dict[str, Any] | list[Any] | list[dict[str, Any]]
+JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
 
 
 logger = get_logger(__name__)
@@ -56,7 +55,7 @@ class RestResponse:
 
     request_id: str = field(init=False)
     status_code: int = field(init=False)
-    response: "JSONType" = field(init=False)
+    response: JSONType = field(init=False)
     response_time: float = field(init=False)
     request: PreparedRequestExt = field(init=False)
     ok: bool = field(init=False)
@@ -74,7 +73,7 @@ class RestResponse:
         object.__setattr__(self, "ok", self._response.ok)
 
     @property
-    def response_as_generator(self) -> Iterator["JSONType"]:
+    def response_as_generator(self) -> Iterator[JSONType]:
         """Return response as a generator. Use this when iterating a large response"""
         yield from self.response
 
