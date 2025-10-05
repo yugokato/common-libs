@@ -1,6 +1,6 @@
 import inspect
 from collections.abc import Callable
-from functools import wraps
+from functools import lru_cache, wraps
 from threading import RLock
 from typing import Any, ParamSpec, TypeVar
 from weakref import WeakValueDictionary
@@ -100,3 +100,41 @@ def freeze_args(f: Callable[P, T]) -> Callable[P, T]:
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def conditional_lru_cache(
+    *,
+    maxsize: int | None = 128,
+    typed: bool = False,
+    condition: Callable[P, bool] | None = None,
+    ignore_if_unhashable: bool = False,
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """A customized version of functools.lru_cache decorator that lets you bypass caches when a condition is met.
+
+    :param maxsize: The maximum size of the cache
+    :param typed: The type of the cache
+    :param condition: The condition to check whether to use caches or not. The callable myst take args and kwargs as
+                      *args and **kwargs (e.g. condition=lambda *args, **kwargs: <your condition>)
+    :param ignore_if_unhashable: If True, the function will still run without caching instead of raising TypeError
+    """
+
+    def decorator(f: Callable[P, T]) -> Callable[P, T]:
+        cached_func = lru_cache(maxsize=maxsize, typed=typed)(f)
+
+        @wraps(f)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            if condition is None or condition(*args, **kwargs):
+                try:
+                    return cached_func(*args, **kwargs)  # type: ignore
+                except TypeError:
+                    if ignore_if_unhashable:
+                        # Ignore unhashable arguments
+                        return f(*args, **kwargs)
+                    else:
+                        raise
+            else:
+                return f(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
