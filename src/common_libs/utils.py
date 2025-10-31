@@ -135,7 +135,7 @@ def clean_obj_name(name: str) -> str:
 
 def wait_until(
     func: Callable,
-    func_args: tuple[Any] | None = None,
+    func_args: tuple[Any, ...] | None = None,
     func_kwargs: dict[str, Any] | None = None,
     interval: float = 2,
     stop_condition: Callable | None = None,
