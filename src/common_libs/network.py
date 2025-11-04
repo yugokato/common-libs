@@ -1,6 +1,6 @@
 import socket
 
-from filelock import FileLock
+from .lock import Lock
 
 
 def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -25,7 +25,7 @@ def find_open_port(start_port: int = 1024, end_port: int = 65535, host: str = "1
     :param start_port: The last port number range to check
     :param host: The host address to check
     """
-    with FileLock("find_open_port"):
+    with Lock("find_open_port"):
         for port in range(start_port, end_port + 1):
             if not is_port_in_use(port, host=host):
                 return port
