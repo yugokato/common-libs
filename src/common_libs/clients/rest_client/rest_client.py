@@ -38,7 +38,7 @@ class RestClient:
         :param timeout: Session timeout in seconds
         :param verify_ssl_certificates: Verify SSL Certificates
         """
-        self.url_base = base_url
+        self.base_url = base_url
         self.session = SessionExt()
         self.timeout = timeout
         self.verify_certificates = verify_ssl_certificates
@@ -279,7 +279,7 @@ class RestClient:
     def _generate_url(self, path: str, query: dict[str, Any] | None = None):
         if not path.startswith("/"):
             path = "/" + path
-        url = f"{self.url_base}{path}"
+        url = f"{self.base_url}{path}"
         if query:
             url += f"?{generate_query_string(query)}"
         return url
