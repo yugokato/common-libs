@@ -1,10 +1,10 @@
 import os
+import weakref
 from pathlib import Path
 
 from filelock import FileLock
 
 from common_libs.logging import get_logger
-from common_libs.signals import register_exit_handler
 
 logger = get_logger(__name__)
 
@@ -22,8 +22,7 @@ class Lock:
             os.makedirs(LOCK_DIR, exist_ok=True)
         self._lock_file = LOCK_DIR / self.LOCK_FILE.format(name=self.name)
         self._lock = FileLock(self._lock_file, timeout=timeout, is_singleton=True)
-
-        register_exit_handler(self.__del__)
+        weakref.finalize(self, self._cleanup)
 
     def __enter__(self):
         if not self._lock.is_locked:
@@ -40,7 +39,7 @@ class Lock:
         if not self._lock.is_locked:
             logger.debug(f"Released lock: {self._lock_file.name}")
 
-    def __del__(self):
+    def _cleanup(self):
         try:
             with self._lock:
                 self._lock.__del__()
