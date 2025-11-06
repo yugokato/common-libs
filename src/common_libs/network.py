@@ -10,12 +10,12 @@ def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     :param host: Host address to check
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.settimeout(1)
+        s.settimeout(0.5)
         try:
-            s.bind((host, port))
-            return False
-        except OSError:
+            s.connect((host, port))
             return True
+        except (ConnectionRefusedError, OSError):
+            return False
 
 
 def find_open_port(start_port: int = 1024, end_port: int = 65535, host: str = "127.0.0.1") -> int:
