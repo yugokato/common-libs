@@ -1,6 +1,7 @@
 import os
 import weakref
 from pathlib import Path
+from typing import Any
 
 from filelock import FileLock
 
@@ -16,12 +17,12 @@ class Lock:
 
     LOCK_FILE = "{name}.lock"
 
-    def __init__(self, name: str = "lock", timeout: float = -1):
+    def __init__(self, name: str = "lock", timeout: float = -1, is_singleton: bool = True, **kwargs: Any) -> None:
         self.name = name
         if not LOCK_DIR.exists():
             os.makedirs(LOCK_DIR, exist_ok=True)
         self._lock_file = LOCK_DIR / self.LOCK_FILE.format(name=self.name)
-        self._lock = FileLock(self._lock_file, timeout=timeout, is_singleton=True)
+        self._lock = FileLock(self._lock_file, timeout=timeout, is_singleton=is_singleton, **kwargs)
         weakref.finalize(self, self._cleanup)
 
     def __enter__(self):
