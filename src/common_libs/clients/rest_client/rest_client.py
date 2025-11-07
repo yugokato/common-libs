@@ -1,6 +1,6 @@
 from typing import Any
 
-import requests.utils
+import requests
 from requests.hooks import HOOKS
 
 from common_libs.logging import get_logger
