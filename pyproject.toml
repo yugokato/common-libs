@@ -36,7 +36,7 @@ dev = [
     "ruff>=0.14.0,<0.15.0",
 ]
 test = [
-    "pytest>=8.0.0,<9",
+    "pytest>=8.0.0,<10",
     "pytest-lazy-fixtures>=1.2.0,<2",
     "pytest-mock>=3.14.0",
     "pytest-smoke",
