@@ -32,7 +32,7 @@ class ColorCodes:
 
 def color(
     text: Any,
-    color_code: str = ColorCodes.GREEN,
+    color_code: str | None = ColorCodes.GREEN,
     bold: bool = False,
     underline: bool = False,
     escape: bool = False,

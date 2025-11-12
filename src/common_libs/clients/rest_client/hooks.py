@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def get_hooks(rest_client: RestClient, quiet: bool) -> dict[str, list[Callable]]:
+def get_hooks(rest_client: RestClient, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
     """Get request/response hooks"""
     return {
         "request": [_hook_factory(_log_request, quiet)],
@@ -29,7 +29,7 @@ def get_hooks(rest_client: RestClient, quiet: bool) -> dict[str, list[Callable]]
     }
 
 
-def _log_request(request: PreparedRequestExt, quiet: bool, **kwargs):
+def _log_request(request: PreparedRequestExt, quiet: bool, **kwargs: Any) -> None:
     """Log API request"""
     log_data = {
         "request_id": request.request_id,
@@ -43,7 +43,7 @@ def _log_request(request: PreparedRequestExt, quiet: bool, **kwargs):
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool, *args, **kwargs):
+def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool, *args: Any, **kwargs: Any) -> None:
     """Log API response"""
     request: PreparedRequestExt = response.request
     log_data = {
@@ -72,7 +72,9 @@ def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: boo
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool, *args, **kwargs):
+def _print_api_summary(
+    response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool, *args: Any, **kwargs: Any
+) -> None:
     """Print API request/response summary to the console"""
     request: PreparedRequestExt = response.request
     if quiet:
@@ -106,11 +108,12 @@ def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool,
             summary += color(f"{bullet} query params: {query_strings}\n", color_code=ColorCodes.CYAN)
         request_body = process_request_body(request, truncate_bytes=True)
         if request_body:
+            payload: str | bytes
             try:
                 payload = json.dumps(request_body)
             except TypeError:
                 payload = request_body
-            summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)
+            summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)  # type: ignore
 
         # status_code and reason
         status_color_code = ColorCodes.GREEN if response.ok else ColorCodes.RED
@@ -122,6 +125,7 @@ def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool,
         summary += "\n"
 
         # response
+        formatted_response: Any
         if kwargs.get("stream") and response.ok:
             formatted_response = "N/A (streaming)"
         else:
@@ -143,10 +147,10 @@ def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool,
         sys.stdout.flush()
 
 
-def _hook_factory(hook_func: Callable, *hook_args, **hook_kwargs):
+def _hook_factory(hook_func: Callable[..., Any], *hook_args: Any, **hook_kwargs: Any) -> Callable[..., Any]:
     """Dynamically create a hook with arguments"""
 
-    def hook(hook_data: PreparedRequestExt | ResponseExt, *request_args, **request_kwargs):
+    def hook(hook_data: PreparedRequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
         return hook_func(hook_data, *hook_args, *request_args, **hook_kwargs, **request_kwargs)
 
     return hook

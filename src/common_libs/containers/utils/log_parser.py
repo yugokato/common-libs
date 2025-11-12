@@ -79,8 +79,8 @@ def parse_streamed_json_logs(
 
     class LogUnmatched(Exception): ...
 
-    def parse_json_string_line(line: str):
-        parsed_log: dict[str, Any] = json.loads(line, strict=False)
+    def parse_json_string_line(line: str) -> str:
+        parsed_log = json.loads(line, strict=False)
 
         if isinstance(parsed_log, dict):
             if filters and not does_log_match_filters(parsed_log, filters):
@@ -187,7 +187,7 @@ def does_log_match_filters(json_log: dict[str, Any], filters: dict[str, Any]) ->
     return True
 
 
-def _get_log_color(log_part: str) -> str:
+def _get_log_color(log_part: str) -> str | None:
     """Return a color code based on the log level in the log or partial log"""
     if any(level in log_part for level in ["ERROR", "FATAL", "CRITICAL"]):
         color_code = ColorCodes.RED
@@ -200,7 +200,7 @@ def _get_log_color(log_part: str) -> str:
     return color_code
 
 
-def _format_log(original_line: str, parsed_log: dict[str, Any], formatter: str | None = None):
+def _format_log(original_line: str, parsed_log: dict[str, Any], formatter: str | None = None) -> str:
     if formatter:
         try:
             formatted_line = formatter.format_map(parsed_log)
@@ -221,7 +221,7 @@ def _format_log(original_line: str, parsed_log: dict[str, Any], formatter: str |
     return formatted_line
 
 
-def _apply_color(line: str, color_code: str):
+def _apply_color(line: str, color_code: str) -> str:
     """Apply a color to the line that may/may not contain text(s) with another color.
 
     Existing colored texts will be preserved as is on top of the colored line by replacing all existing "default"

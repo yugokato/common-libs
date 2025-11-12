@@ -48,7 +48,7 @@ def singleton(cls: type[T]) -> type[T]:
     orig_new = cls.__new__
     orig_init = cls.__init__
     instances: WeakValueDictionary[tuple[type[T], int], T] = WeakValueDictionary()
-    cls._lock = RLock()
+    cls._lock = RLock()  # type: ignore[attr-defined]
 
     @wraps(orig_new)
     def __new__(cls: type[T], *args: Any, **kwargs: Any) -> T:
@@ -61,23 +61,23 @@ def singleton(cls: type[T]) -> type[T]:
         else:
             bound_args.apply_defaults()
             key = (cls, generate_hash(bound_args.arguments))
-            with cls._lock:
+            with cls._lock:  # type: ignore[attr-defined]
                 if key not in instances:
                     instance = orig_new(cls)
                     instances[key] = instance
             return instances[key]
 
     @wraps(orig_init)
-    def __init__(self: T, *args: Any, **kwargs: Any):
-        with cls._lock:
+    def __init__(self: T, *args: Any, **kwargs: Any) -> None:
+        with cls._lock:  # type: ignore[attr-defined]
             # Ensure init is called only once
             if getattr(self, "__initialized", False):
                 return
             orig_init(self, *args, **kwargs)
-            self.__initialized = True
+            self.__initialized = True  # type: ignore[attr-defined]
 
-    cls.__new__ = __new__
-    cls.__init__ = __init__
+    cls.__new__ = __new__  # type: ignore[method-assign,assignment]
+    cls.__init__ = __init__  # type: ignore[method-assign,assignment]
     return cls
 
 
@@ -95,9 +95,9 @@ def freeze_args(f: Callable[P, T]) -> Callable[P, T]:
 
     @wraps(f)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        args = freeze(args)
-        kwargs = {k: freeze(v) for k, v in kwargs.items()}
-        return f(*args, **kwargs)
+        frozen_args = freeze(args)
+        frozen_kwargs = {k: freeze(v) for k, v in kwargs.items()}
+        return f(*frozen_args, **frozen_kwargs)
 
     return wrapper
 

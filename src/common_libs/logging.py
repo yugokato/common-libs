@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import MutableMapping
 from enum import StrEnum, auto
 from logging import LogRecord, config
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -42,17 +44,17 @@ def get_logger(name: str) -> LoggerAdapter:
 class CustomLoggingArgs(StrEnum):
     """Custom logging arguments"""
 
-    def _generate_next_value_(name, start, count, last_values):
+    def _generate_next_value_(name: str, start: int, count: int, last_values: list[str]) -> str:  # type: ignore[override]
         return name.lower()
 
     COLOR_CODE = auto()
     # TODO: Add more if needed
 
 
-class LoggerAdapter(logging.LoggerAdapter):
+class LoggerAdapter(logging.LoggerAdapter[logging.Logger]):
     """Custom LoggerAdapter"""
 
-    def process(self, msg, kwargs):
+    def process(self, msg: Any, kwargs: MutableMapping[str, Any]) -> tuple[Any, MutableMapping[str, Any]]:
         """Support custom arguments to logging calls, and add various fields to log extra
 
         eg. logger.info("message", color_code=ColorCodes.GREEN)
@@ -61,7 +63,7 @@ class LoggerAdapter(logging.LoggerAdapter):
         # (https://github.com/python/cpython/issues/76913)
         # We will fix this behavior by explicitly merging it with the self.extra
         # TODO: Switch to use the new `merge_extra=True` init option after Python 3.13
-        extra = (self.extra or {}) | (kwargs.get("extra") or {})
+        extra = (self.extra or {}) | (kwargs.get("extra") or {})  # type: ignore[operator]
         for custom_arg in CustomLoggingArgs:
             if custom_arg in kwargs:
                 extra.update(**{custom_arg: kwargs.pop(custom_arg)})
@@ -69,7 +71,7 @@ class LoggerAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
-class ColoredStreamHandler(logging.StreamHandler):
+class ColoredStreamHandler(logging.StreamHandler):  # type: ignore[type-arg]
     """Colored StreamHandler"""
 
     @classmethod
@@ -87,7 +89,7 @@ class ColoredStreamHandler(logging.StreamHandler):
         else:
             return ColorCodes.DEFAULT
 
-    def format(self, record):
+    def format(self, record: LogRecord) -> str:
         """Add ANSI color code to record based on the level number, or one that is explicitly specified"""
         color_code = getattr(record, CustomLoggingArgs.COLOR_CODE, None) or self._get_color_code(record.levelno)
         msg = super().format(record)
@@ -95,11 +97,10 @@ class ColoredStreamHandler(logging.StreamHandler):
 
 
 class LogFilter(logging.Filter):
-    def filter(self, record) -> bool:
+    def filter(self, record: LogRecord) -> bool:
         for custom_arg in CustomLoggingArgs:
             if hasattr(record, custom_arg):
                 delattr(record, custom_arg)
-
         return True
 
 

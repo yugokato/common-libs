@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 from requests import Session
@@ -16,12 +16,13 @@ from requests import Session
 from common_libs.logging import get_logger
 
 if TYPE_CHECKING:
-    from .ext import PreparedRequestExt, ResponseExt, RestResponse
+    from .ext import JSONType, PreparedRequestExt, ResponseExt, RestResponse
     from .rest_client import RestClient
 
 
 P = ParamSpec("P")
 RT = TypeVar("RT")
+T = TypeVar("T")
 
 logger = get_logger(__name__)
 
@@ -29,13 +30,13 @@ logger = get_logger(__name__)
 TRUNCATE_LEN = 512
 
 
-def generate_query_string(query_params: dict[str, Any]):
+def generate_query_string(query_params: dict[str, Any]) -> str:
     """Returns a string containing the URL query string based on the passed dictionary
 
     :param query_params: A dictionary of key/value pairs that will be used in the API call
     """
 
-    def convert_if_bool(val):
+    def convert_if_bool(val: Any) -> Any:
         """Convert boolean to lower string"""
         if isinstance(val, bool):
             return str(val).lower()
@@ -48,7 +49,9 @@ def generate_query_string(query_params: dict[str, Any]):
     return query_string
 
 
-def process_request_body(request: PreparedRequestExt, hide_sensitive_values: bool = True, truncate_bytes: bool = False):
+def process_request_body(
+    request: PreparedRequestExt, hide_sensitive_values: bool = True, truncate_bytes: bool = False
+) -> str | bytes:
     """Process request body (PreparedRequest.body)"""
     body = request.body
     if body:
@@ -70,7 +73,7 @@ def process_request_body(request: PreparedRequestExt, hide_sensitive_values: boo
     return body
 
 
-def mask_sensitive_value(body: Any, content_type: str):
+def mask_sensitive_value(body: Any, content_type: str) -> Any:
     """Mask a field value when a field name of the request body contains specific word"""
     if isinstance(body, dict):
         part_field_names_to_mask_value = [
@@ -94,9 +97,7 @@ def mask_sensitive_value(body: Any, content_type: str):
     return body
 
 
-def process_response(
-    response: ResponseExt | RestResponse, prettify: bool = False
-) -> str | bytes | dict[str, Any] | list[str | bytes | dict[str, Any]]:
+def process_response(response: ResponseExt | RestResponse, prettify: bool = False) -> JSONType:
     """Get json-encoded content of a response if possible, otherwise return content of the response"""
     from .ext import RestResponse
 
@@ -118,6 +119,7 @@ def parse_query_strings(url: str) -> dict[str, Any] | None:
     if q.query:
         query_params = parse_qs(q.query)
         return {k: v[0] if len(v) == 1 else v for k, v in query_params.items()}
+    return None
 
 
 def get_response_reason(response: ResponseExt) -> str:
@@ -136,9 +138,9 @@ def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
 
     @wraps(f)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
-        self: RestClient = args[0]
+        self: RestClient = args[0]  # type: ignore[assignment]
         session_headers = self.session.headers
-        request_headers = kwargs.get("headers", {})
+        request_headers = cast(dict[str, Any], kwargs.get("headers", {}))
         headers = {**session_headers, **request_headers}
         has_content_type_header = "Content-Type" in [h.title() for h in list(headers.keys())]
         content_type_set = False
@@ -155,11 +157,11 @@ def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
 
 
 def retry_on(
-    condition: int | Sequence[int] | Callable[[RestResponse], bool],
+    condition: int | Sequence[int] | Callable[[ResponseExt], bool],
     num_retry: int = 1,
     retry_after: float = 5,
     safe_methods_only: bool = False,
-):
+) -> Callable[[Callable[P, ResponseExt]], Callable[P, ResponseExt]]:
     """Retry the request if the given condition matches
 
     :param condition: Either status code(s) or a function that takes response object as the argument
@@ -168,8 +170,8 @@ def retry_on(
     :param safe_methods_only: Retry will happen only for safe methods
     """
 
-    def decorator_with_args(f: Callable[P, RT]) -> Callable[P, RT]:
-        def matches_condition(r: RestResponse) -> bool:
+    def decorator_with_args(f: Callable[P, ResponseExt]) -> Callable[P, ResponseExt]:
+        def matches_condition(r: ResponseExt) -> bool:
             if isinstance(condition, int):
                 return r.status_code == condition
             elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
@@ -180,8 +182,8 @@ def retry_on(
                 raise ValueError(f"Invalid condition: {condition}")
 
         @wraps(f)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
-            resp: ResponseExt | RestResponse = f(*args, **kwargs)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> ResponseExt:
+            resp: ResponseExt = f(*args, **kwargs)
             num_retried = 0
             while num_retried < num_retry:
                 if matches_condition(resp):
@@ -233,7 +235,7 @@ def get_supported_request_parameters() -> list[str]:
     return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
 
 
-def _decode_utf8(obj: Any):
+def _decode_utf8(obj: Any) -> Any:
     """Decode bytes object with UTF-8, if possible"""
     if obj and isinstance(obj, bytes):
         try:
@@ -250,7 +252,7 @@ def _truncate(v: str | bytes) -> str | bytes:
     trunc_pos = int(TRUNCATE_LEN / 2)
     trunc_mark = "   ...TRUNCATED...   "
     if isinstance(v, bytes):
-        trunc_mark = trunc_mark.encode("utf-8")
+        trunc_mark = trunc_mark.encode("utf-8")  # type: ignore[assignment]
     else:
         trunc_mark = "\n\n" + trunc_mark + "\n\n"
-    return v[:trunc_pos] + trunc_mark + v[-trunc_pos:]
+    return v[:trunc_pos] + trunc_mark + v[-trunc_pos:]  # type: ignore[operator]

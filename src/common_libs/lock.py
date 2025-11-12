@@ -1,7 +1,7 @@
 import os
 import weakref
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from filelock import FileLock
 
@@ -25,7 +25,7 @@ class Lock:
         self._lock = FileLock(self._lock_file, timeout=timeout, is_singleton=is_singleton, **kwargs)
         weakref.finalize(self, self._cleanup)
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         if not self._lock.is_locked:
             logger.debug(f"Acquiring lock: {self._lock_file.name}")
         try:
@@ -35,12 +35,12 @@ class Lock:
             self._lock.acquire()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *args: Any) -> None:
         self._lock.release()
         if not self._lock.is_locked:
             logger.debug(f"Released lock: {self._lock_file.name}")
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         try:
             with self._lock:
                 self._lock.__del__()

@@ -6,7 +6,7 @@ import tarfile
 from collections.abc import Callable
 from functools import cached_property, wraps
 from pathlib import Path
-from typing import Self, cast
+from typing import Any, ParamSpec, Self, TypeVar, cast
 
 import docker
 import docker.errors
@@ -21,15 +21,18 @@ from common_libs.signals import register_exit_handler
 from .containerd import Container as ContainerdContainer
 from .containerd import Containerd
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 logger = get_logger(__name__)
 
 APP_NAME = os.getenv("APP_NAME", default="default")
 
 
-def requires_container(f):
+def requires_container(f: Callable[P, R]) -> Callable[P, R]:
     @wraps(f)
-    def wrapper(*args, **kwargs):
-        self: BaseContainer = args[0]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        self = cast(BaseContainer, args[0])
         if self.container is None:
             err = "Container object has not been set."
             if not self.is_containerd:
@@ -54,12 +57,12 @@ def requires_container(f):
     return wrapper
 
 
-def requires_dockerd_runtime(f):
+def requires_dockerd_runtime(f: Callable[P, R]) -> Callable[P, R]:
     """Requires dockerd container runtime. This restricts the usage in the containerd runtime"""
 
     @wraps(f)
-    def wrapper(*args, **kwargs):
-        self: BaseContainer = args[0]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        self = cast(BaseContainer, args[0])
         if self.is_containerd:
             raise NotImplementedError(f"<{type(self).__name__}>.{f.__name__}() is not supported for containerd runtime")
         return f(*args, **kwargs)
@@ -98,7 +101,7 @@ class BaseContainer:
         timeout: int = 60,
         is_containerd: bool = False,
         enable_automatic_recovery_on_404: bool = False,
-    ):
+    ) -> None:
         if is_containerd:
             if not name:
                 raise ValueError("The existing container name is required when is_containerd=True")
@@ -129,7 +132,7 @@ class BaseContainer:
         return self._container
 
     @container.setter
-    def container(self, container_obj: DockerdContainer | ContainerdContainer):
+    def container(self, container_obj: DockerdContainer | ContainerdContainer) -> None:
         """Set container object"""
         self._container = container_obj
 
@@ -142,9 +145,10 @@ class BaseContainer:
 
     @requires_dockerd_runtime
     def run(
-        self, detach: bool = True, remove: bool = True, stdin_open: bool = True, tty: bool = True, **kwargs
+        self, detach: bool = True, remove: bool = True, stdin_open: bool = True, tty: bool = True, **kwargs: Any
     ) -> Self:
         """Run container"""
+        assert self.docker_client is not None
         self._delete_existing_containers()
         logger.info(f"Starting a container {self.image}:{self.tag}", color_code=ColorCodes.YELLOW)
         labels = {f"{BaseContainer.label_base}.app": APP_NAME}
@@ -169,7 +173,7 @@ class BaseContainer:
         return self
 
     @requires_dockerd_runtime
-    def delete(self):
+    def delete(self) -> None:
         """Delete container"""
         if self.container:
             logger.info(f"Deleting a container {self.container.id}", color_code=ColorCodes.YELLOW)
@@ -192,11 +196,11 @@ class BaseContainer:
         ignore_error: bool = False,
         suppress_output: bool = False,
         quiet: bool = False,
-        output_parser: Callable | None = None,
+        output_parser: Callable[..., Any] | None = None,
         # raw parameters from <Container>.exec_run()
         stream: bool = False,
         detach: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> tuple[int, str] | None:
         """Execute a command inside a container
 
@@ -224,6 +228,7 @@ class BaseContainer:
             - To match multiple patterns as AND (order matters), use ".*". eg. "a.*b"
             - Character escaping will be automatically handled within this function. Specify raw pattern(s)
         """
+        assert self.container is not None
         if self.is_containerd and stream:
             raise ValueError("stream option is not supported for containerd")
 
@@ -265,7 +270,7 @@ class BaseContainer:
             exit_code, resp = self.container.exec_run(_cmd, detach=detach, stream=stream, **kwargs)
 
         if detach:
-            return
+            return None
         else:
             if stream:
                 try:
@@ -276,18 +281,17 @@ class BaseContainer:
                     else:
                         for chunk in resp:
                             if chunk.rstrip():
-                                decoded_chunk = chunk.decode("utf-8")
-                                for line in decoded_chunk.splitlines():
+                                for line in chunk.splitlines():
                                     sys.stdout.write(line + "\n")
                                     sys.stdout.flush()
                 except KeyboardInterrupt:
                     print("Stopped")  # noqa: T201
             else:
-                if isinstance(resp, bytes):
-                    try:
-                        resp = resp.decode("utf-8")
-                    except UnicodeDecodeError:
-                        pass
+                # if isinstance(resp, bytes):
+                #     try:
+                #         resp = resp.decode("utf-8")
+                #     except UnicodeDecodeError:
+                #         pass
                 if exit_code == 0:
                     if output_parser:
                         resp = output_parser(resp)
@@ -313,16 +317,18 @@ class BaseContainer:
                             raise CommandError(
                                 f"The command returned non-zero code ({exit_code}): {resp}", exit_code=exit_code
                             )
-                return exit_code, cast(str, resp.rstrip())
+                return exit_code, resp.rstrip()
+        return None
 
     @requires_dockerd_runtime
     @requires_container
-    def upload_file(self, source_file_path: Path | str, dest_dir_path: str | None = None):
+    def upload_file(self, source_file_path: Path | str, dest_dir_path: str | None = None) -> None:
         """Upload a file to the container as a tar archive
 
         :param source_file_path: Local file path
         :param dest_dir_path: A directory path inside the container. Defaults to /tmp
         """
+        assert self.container is not None
         if not dest_dir_path:
             dest_dir_path = self.tmp_dir
         if not tarfile.is_tarfile(source_file_path):
@@ -341,6 +347,7 @@ class BaseContainer:
         :param dest_dir_path: A local directory path to save to
         :param extract_file: Extract the file
         """
+        assert self.container is not None
         logger.info(f"Downloading a file: {source_file_path}")
         data, stat = self.container.get_archive(source_file_path, encode_stream=True)
         assert data
@@ -365,6 +372,7 @@ class BaseContainer:
         if self.is_containerd:
             return self.containerd.get_containers(name=self.name)
         else:
+            assert self.docker_client is not None
             label = [f"{BaseContainer.label_base}.app={APP_NAME}"]
             if self.labels:
                 label.extend(f"{BaseContainer.label_base}.{k}={v}" for k, v in self.labels.items() if v is not None)
@@ -374,7 +382,7 @@ class BaseContainer:
             return self.docker_client.containers.list(filters=filters)
 
     @requires_dockerd_runtime
-    def _delete_existing_containers(self):
+    def _delete_existing_containers(self) -> None:
         if existing_containers := self.get_existing_containers():
             logger.info(f"Deleting an existing container {existing_containers}", color_code=ColorCodes.YELLOW)
             for c in existing_containers:

@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import traceback
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TypeAlias
+from typing import Any, TypeAlias, cast
 
 from requests import ConnectionError, PreparedRequest, ReadTimeout, Response, Session
 from requests.auth import AuthBase
@@ -20,10 +22,10 @@ logger = get_logger(__name__)
 
 
 class BearerAuth(AuthBase):
-    def __init__(self, token):
+    def __init__(self, token: str) -> None:
         self.token = token
 
-    def __call__(self, r):
+    def __call__(self, r: PreparedRequestExt) -> PreparedRequestExt:
         r.headers["Authorization"] = f"Bearer {self.token}"
         return r
 
@@ -31,7 +33,7 @@ class BearerAuth(AuthBase):
 class PreparedRequestExt(PreparedRequest):
     """Extended PreparedRequest class that generates a request UUID for each request"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.request_id = str(uuid.uuid4())
         self.start_time: datetime | None = None
@@ -61,7 +63,7 @@ class RestResponse:
     ok: bool = field(init=False)
     is_stream: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", self._response.request.request_id)
         object.__setattr__(self, "status_code", self._response.status_code)
         object.__setattr__(self, "response_time", self._response.elapsed.total_seconds())
@@ -75,21 +77,23 @@ class RestResponse:
     @property
     def response_as_generator(self) -> Iterator[JSONType]:
         """Return response as a generator. Use this when iterating a large response"""
+        if not isinstance(self.response, list):
+            raise TypeError("Response should be a list")
         yield from self.response
 
-    def raise_for_status(self):
+    def raise_for_status(self) -> None:
         self._response.raise_for_status()
 
-    def _process_response(self, response: ResponseExt):
+    def _process_response(self, response: ResponseExt) -> JSONType:
         """Get json-encoded content of a response if possible, otherwise return content of the response."""
         return process_response(response)
 
 
 class SessionExt(Session):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
-    def send(self, request: PreparedRequestExt, **kwargs) -> ResponseExt:
+    def send(self, request: PreparedRequestExt, **kwargs: Any) -> ResponseExt:
         """Add following behaviors to requests.Session.send()
 
         - Set X-Request-ID header
@@ -131,11 +135,11 @@ class SessionExt(Session):
             raise
 
     @retry_on(503, retry_after=15, safe_methods_only=True)
-    def _send(self, request: PreparedRequestExt, **kwargs) -> Response | ResponseExt:
+    def _send(self, request: PreparedRequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
         request.start_time = datetime.now(tz=UTC)
         dispatch_hook("request", request.hooks, request, **kwargs)
         try:
-            return super().send(request, **kwargs)
+            return cast(ResponseExt, super().send(request, **kwargs))
         finally:
             request.end_time = datetime.now(tz=UTC)

@@ -28,17 +28,17 @@ logger = get_logger(__name__)
 MAX_CONNECTIONS = 50
 
 
-def cursor_factory(client: PostgreSQLClient, logging: bool = False):
+def cursor_factory(client: PostgreSQLClient, logging: bool = False) -> Callable[..., Any]:
     """Returns a custom cursor factory"""
 
     class Cursor(ClientCursor):
         """Custom cursor that adds ability to enable SQL query logging"""
 
-        def __init__(self, client: PostgreSQLClient, *args, **kwargs):
+        def __init__(self, client: PostgreSQLClient, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self.client = client
 
-        def execute(self, sql: str, vars: Sequence[Any] | None = None):
+        def execute(self, sql: str, vars: Sequence[Any] | None = None) -> None:
             client_name = self.client.name.capitalize()
             if isinstance(vars, tuple):
                 vars = list(vars)
@@ -58,7 +58,7 @@ def cursor_factory(client: PostgreSQLClient, logging: bool = False):
                 )
                 raise
 
-    def create_cursor(*args, **kwargs):
+    def create_cursor(*args: Any, **kwargs: Any) -> Cursor:
         return Cursor(client, *args, **kwargs)
 
     return create_cursor
@@ -66,8 +66,8 @@ def cursor_factory(client: PostgreSQLClient, logging: bool = False):
 
 def check_connection(f: Callable[P, R]) -> Callable[P, R]:
     @wraps(f)
-    def wrapper(*args: P.args, **kwargs: P.kwargs):
-        self: PostgreSQLClient = args[0]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        self = cast(PostgreSQLClient, args[0])
         if not kwargs.get("connection") or self._connection_pool is None:
             self.connect()
         try:
@@ -76,7 +76,6 @@ def check_connection(f: Callable[P, R]) -> Callable[P, R]:
             if isinstance(e, PoolTimeout | PoolClosed) or "EOF detected" in str(e):
                 time.sleep(3)
                 logger.warning("Reconnecting...")
-                self.conn = None
                 self.disconnect()
                 self.connect()
                 return f(*args, **kwargs)
@@ -129,7 +128,7 @@ class PostgreSQLClient:
         if connect:
             self.connect()
 
-    def connect(self):
+    def connect(self) -> None:
         """Connect to database"""
         if self._connection_pool is None:
             logger.info(f"Connecting to {self.db_name.capitalize()} as '{self.user}': {self.host}:{self.port}")
@@ -142,7 +141,7 @@ class PostgreSQLClient:
             )
             register_exit_handler(self.disconnect)
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         """Disconnect from database"""
         if self._connection_pool is not None:
             logger.info(f"Disconnecting from {self.db_name.capitalize()}...")
@@ -170,6 +169,7 @@ class PostgreSQLClient:
         else:
             if self._connection_pool is None:
                 self.connect()
+            assert self._connection_pool is not None
             max_retry = 10
             count = 0
             while count < max_retry:
@@ -188,7 +188,7 @@ class PostgreSQLClient:
 
     @contextmanager
     def get_cursor(
-        self, connection: Connection, /, *, logging: bool = False, row_factory: Callable = dict_row
+        self, connection: Connection, /, *, logging: bool = False, row_factory: Callable[..., Any] = dict_row
     ) -> Iterator[Cursor]:
         """Get a custom cursor for the given connection
 
@@ -288,7 +288,7 @@ class PostgreSQLClient:
         schema_names: str | Sequence[str] | None = None,
         columns_to_select: str | Sequence[str] | None = None,
         return_result: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> list[dict[str, Any]] | None:
         """Show tables"""
         if columns_to_select:
@@ -305,7 +305,7 @@ class PostgreSQLClient:
             if isinstance(schema_names, str):
                 vars = [schema_names]
             else:
-                vars = [list(schema_names)]
+                vars = list(schema_names)
         else:
             sql += " <> ALL(%s)"
             vars = ["pg_catalog", "information_schema", "public"]
@@ -326,8 +326,10 @@ class PostgreSQLClient:
         if return_result:
             return tables
 
+        return None
+
     @check_connection
-    def show_function_definition(self, func_name: str):
+    def show_function_definition(self, func_name: str) -> None:
         """Show user-defined function definition"""
         self.SELECT("SELECT prosrc FROM pg_proc WHERE proname=%s", vars=(func_name,), print_table=True)
 
@@ -349,7 +351,7 @@ class PostgreSQLClient:
         return query
 
 
-def customize_adapters():
+def customize_adapters() -> None:
     """Customize psycopg adapters for specific types"""
     # Dumpers
     psycopg.adapters.register_dumper(dict, psycopg.types.json.JsonbDumper)

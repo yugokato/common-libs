@@ -45,7 +45,7 @@ class RestClient:
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
 
-    def get(self, path: str, /, *, quiet: bool = False, **query_params) -> RestResponse:
+    def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make a GET API request
 
         :param path: Endpoint path
@@ -55,7 +55,7 @@ class RestClient:
         return self._get(path, query=query_params, quiet=quiet)
 
     def post(
-        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload
+        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
     ) -> RestResponse:
         """Make a POST API request
 
@@ -66,7 +66,7 @@ class RestClient:
         """
         return self._post(path, json=payload, files=files, quiet=quiet)
 
-    def delete(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
+    def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a DELETE API request
 
         :param path: Endpoint path
@@ -75,7 +75,7 @@ class RestClient:
         """
         return self._delete(path, json=payload, quiet=quiet)
 
-    def put(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
+    def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PUT API request
 
         :param path: Endpoint path
@@ -84,7 +84,7 @@ class RestClient:
         """
         return self._put(path, json=payload, quiet=quiet)
 
-    def patch(self, path: str, /, *, quiet: bool = False, **payload) -> RestResponse:
+    def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PATCH API request
 
         :param path: Endpoint path
@@ -93,7 +93,7 @@ class RestClient:
         """
         return self._patch(path, json=payload, quiet=quiet)
 
-    def options(self, path: str, /, *, quiet: bool = False, **query_params) -> RestResponse:
+    def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
@@ -104,7 +104,7 @@ class RestClient:
 
     @manage_content_type
     def _get(
-        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
+        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options: Any
     ) -> RestResponse:
         """Low-level function of get()
 
@@ -132,7 +132,7 @@ class RestClient:
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
-        **requests_lib_options,
+        **requests_lib_options: Any,
     ) -> RestResponse:
         """Low-level function of post()
 
@@ -161,7 +161,7 @@ class RestClient:
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
-        **requests_lib_options,
+        **requests_lib_options: Any,
     ) -> RestResponse:
         """Low-level function of delete()
 
@@ -190,7 +190,7 @@ class RestClient:
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
-        **requests_lib_options,
+        **requests_lib_options: Any,
     ) -> RestResponse:
         """Low-level function of put()
 
@@ -219,7 +219,7 @@ class RestClient:
         json: dict[str, Any] | list[Any] | None = None,
         query: dict[str, Any] | None = None,
         quiet: bool = False,
-        **requests_lib_options,
+        **requests_lib_options: Any,
     ) -> RestResponse:
         """Low-level function of patch()
 
@@ -241,7 +241,7 @@ class RestClient:
 
     @manage_content_type
     def _options(
-        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options
+        self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **requests_lib_options: Any
     ) -> RestResponse:
         """Low-level function of options()
 
@@ -267,16 +267,17 @@ class RestClient:
             authorization_header := self.session.headers.get("Authorization")
         ) and authorization_header.lower().startswith("bear "):
             return authorization_header.split(" ")[1]
+        return None
 
-    def set_bearer_token(self, token: str):
+    def set_bearer_token(self, token: str) -> None:
         """Set bear token to the current session"""
         self.session.auth = BearerAuth(token)
 
-    def unset_bear_token(self):
+    def unset_bear_token(self) -> None:
         """Unset bear token from the current session"""
         self.session.auth = None
 
-    def _generate_url(self, path: str, query: dict[str, Any] | None = None):
+    def _generate_url(self, path: str, query: dict[str, Any] | None = None) -> str:
         if not path.startswith("/"):
             path = "/" + path
         url = f"{self.base_url}{path}"

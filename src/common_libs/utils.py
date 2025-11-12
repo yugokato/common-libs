@@ -14,7 +14,7 @@ from common_libs.logging import get_logger
 logger = get_logger(__name__)
 
 
-def prompt_confirmation(prompt: str, yes: str = "Y", no: str = "N"):
+def prompt_confirmation(prompt: str, yes: str = "Y", no: str = "N") -> None:
     """Show a confirmation prompt before moving forward"""
     try:
         while (v := input(color(prompt + f" ({yes}/{no}): ", color_code=ColorCodes.RED))) != yes:
@@ -32,7 +32,7 @@ def merge_dicts(dict1: dict[str, Any], dict2: dict[str, Any]) -> dict[str, Any]:
     :merge_list: Merge list items of dict1 and dict2. Defaults to overwrite with dict1's value
     """
 
-    def merge(a: Any, b: Any):
+    def merge(a: Any, b: Any) -> Any:
         if isinstance(b, dict):
             for k, v in b.items():
                 if k in a:
@@ -53,7 +53,7 @@ def list_items(obj: Iterable[Any], style: str = "-", indent: int = 0) -> str:
     """
     space = " "
 
-    def handle_newlines(lines):
+    def handle_newlines(lines: str) -> str:
         if "\n" in lines:
             inner_style = (indent + len(style)) * space
             offset = indent + len(style) + len(space)
@@ -64,7 +64,7 @@ def list_items(obj: Iterable[Any], style: str = "-", indent: int = 0) -> str:
     return "\n".join(f"{' ' * indent}{style}{space}{handle_newlines(str(x))}" for x in obj)
 
 
-def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bool = False):
+def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bool = False) -> None:
     """Log given string as a styled section
 
     A section/sub-section will look like this:
@@ -88,7 +88,7 @@ def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bo
     except OSError:
         terminal_size_col = 130
 
-    def format_line(string):
+    def format_line(string: str) -> str:
         filler = " " * (terminal_size_col - (len(string) + len_padding))
         return f"# {string}{filler} #\n"
 
@@ -134,11 +134,11 @@ def clean_obj_name(name: str) -> str:
 
 
 def wait_until(
-    func: Callable,
+    func: Callable[..., Any],
     func_args: tuple[Any, ...] | None = None,
     func_kwargs: dict[str, Any] | None = None,
     interval: float = 2,
-    stop_condition: Callable | None = None,
+    stop_condition: Callable[..., Any] | None = None,
     timeout: float = 30,
 ) -> Any:
     """Wait until the return value of the given polling function matches the expected condition, or raises a
@@ -169,7 +169,7 @@ def wait_until(
     raise TimeoutError(f"Waited for {timeout} seconds but the polling result did not match the expected condition")
 
 
-def is_decorator_with_args(decorator: Callable[..., Any]) -> bool:
+def is_decorator_with_args(decorator: Any) -> bool:
     """Check if the given decorator is a regular decorator or a decorator that takes arguments
 
     :param decorator: A decorator function

@@ -43,6 +43,6 @@ def create_tar_file(file_path: Path | str, dest_dir_path: Path | str | None = No
     file_name = file_path.name
     tar_file_name = file_name + f".tar.{mode}"
     dest_file_path = Path(dest_dir_path) / tar_file_name
-    with tarfile.open(dest_file_path, mode=f"w:{mode}") as tar:
+    with tarfile.open(str(dest_file_path), mode=f"w:{mode}") as tar:  # type: ignore[call-overload]
         tar.add(file_path, arcname=file_name)
     return dest_file_path

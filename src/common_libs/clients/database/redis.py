@@ -25,7 +25,7 @@ class RedisClient:
     def db(self) -> redis.Redis | None:
         return self._db
 
-    def connect(self):
+    def connect(self) -> None:
         """Connect to Redis"""
         if self.db is None:
             logger.info(f"Connecting to {self.host}:{self.port}")
@@ -38,7 +38,8 @@ class RedisClient:
         count = 10000
         result = []
 
-        def _scan(cur=0):
+        def _scan(cur: int = 0) -> int:
+            assert self._db is not None
             next_cur, keys = self._db.scan(cursor=cur, match=pattern, count=count)
             result.extend(keys)
             return next_cur
