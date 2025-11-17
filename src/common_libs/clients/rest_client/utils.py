@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import time
 import urllib.parse
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
-from requests import Session
+from httpx import Client
 
 from common_libs.logging import get_logger
 
 if TYPE_CHECKING:
-    from .ext import JSONType, PreparedRequestExt, ResponseExt, RestResponse
-    from .rest_client import RestClient
+    from .ext import JSONType, RequestExt, ResponseExt, RestResponse
+    from .rest_client import AsyncRestClient, RestClient
 
 
 P = ParamSpec("P")
@@ -50,10 +51,10 @@ def generate_query_string(query_params: dict[str, Any]) -> str:
 
 
 def process_request_body(
-    request: PreparedRequestExt, hide_sensitive_values: bool = True, truncate_bytes: bool = False
+    request: RequestExt, hide_sensitive_values: bool = True, truncate_bytes: bool = False
 ) -> str | bytes:
-    """Process request body (PreparedRequest.body)"""
-    body = request.body
+    """Process request body"""
+    body = request.read()
     if body:
         body = _decode_utf8(body)
         if isinstance(body, bytes):
@@ -104,6 +105,10 @@ def process_response(response: ResponseExt | RestResponse, prettify: bool = Fals
     if isinstance(response, RestResponse):
         response = response._response
     try:
+        if response.is_stream:
+            if response.is_success:
+                raise NotImplementedError("Should not be used for a successful stream response")
+            response.read()
         resp = response.json()
         if prettify:
             resp = json.dumps(resp, indent=4)
@@ -124,8 +129,8 @@ def parse_query_strings(url: str) -> dict[str, Any] | None:
 
 def get_response_reason(response: ResponseExt) -> str:
     """Get response reason from the response. If the response doesn't have the value, we resolve it using HTTPStatus"""
-    if response.reason:
-        return response.reason
+    if response.reason_phrase:
+        return response.reason_phrase
     else:
         try:
             return HTTPStatus(response.status_code).phrase
@@ -138,30 +143,30 @@ def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
 
     @wraps(f)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
-        self: RestClient = args[0]  # type: ignore[assignment]
-        session_headers = self.session.headers
+        self: RestClient | AsyncRestClient = args[0]  # type: ignore[assignment]
+        session_headers = self.client.headers
         request_headers = cast(dict[str, Any], kwargs.get("headers", {}))
         headers = {**session_headers, **request_headers}
         has_content_type_header = "Content-Type" in [h.title() for h in list(headers.keys())]
         content_type_set = False
         if not has_content_type_header and (kwargs.get("json") or not any([kwargs.get("data"), kwargs.get("files")])):
-            self.session.headers.update({"Content-Type": "application/json"})
+            self.client.headers.update({"Content-Type": "application/json"})
             content_type_set = True
         try:
             return f(*args, **kwargs)
         finally:
             if content_type_set:
-                self.session.headers.pop("Content-Type", None)
+                self.client.headers.pop("Content-Type", None)
 
     return wrapper
 
 
 def retry_on(
-    condition: int | Sequence[int] | Callable[[ResponseExt], bool],
+    condition: int | Sequence[int] | Callable[[RT], bool],
     num_retry: int = 1,
     retry_after: float = 5,
     safe_methods_only: bool = False,
-) -> Callable[[Callable[P, ResponseExt]], Callable[P, ResponseExt]]:
+) -> Callable[[Callable[P, RT | Awaitable[RT]]], Callable[P, RT | Awaitable[RT]]]:
     """Retry the request if the given condition matches
 
     :param condition: Either status code(s) or a function that takes response object as the argument
@@ -170,32 +175,39 @@ def retry_on(
     :param safe_methods_only: Retry will happen only for safe methods
     """
 
-    def decorator_with_args(f: Callable[P, ResponseExt]) -> Callable[P, ResponseExt]:
-        def matches_condition(r: ResponseExt) -> bool:
-            if isinstance(condition, int):
-                return r.status_code == condition
-            elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
-                return r.status_code in condition
-            elif callable(condition):
-                return condition(r)
-            else:
-                raise ValueError(f"Invalid condition: {condition}")
+    def matches_condition(r: ResponseExt) -> bool:
+        if isinstance(condition, int):
+            return r.status_code == condition
+        elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
+            return r.status_code in condition
+        elif callable(condition):
+            return condition(r)
+        else:
+            raise ValueError(f"Invalid condition: {condition}")
 
-        @wraps(f)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> ResponseExt:
-            resp: ResponseExt = f(*args, **kwargs)
-            num_retried = 0
-            while num_retried < num_retry:
-                if matches_condition(resp):
-                    if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTION"]:
-                        logger.warning("Retry condition matched but will be skipped (safe_methods_only=True was given)")
+    def decorator_with_args(
+        f: Callable[P, RT | Awaitable[RT]],
+    ) -> Callable[P, RT | Awaitable[RT]]:
+        from .ext import ResponseExt
+
+        if inspect.iscoroutinefunction(f):
+
+            @wraps(f)
+            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
+                resp = cast(ResponseExt, await f(*args, **kwargs))
+                num_retried = 0
+
+                while num_retried < num_retry and matches_condition(resp):
+                    if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
+                        logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
                         return resp
 
-                    original_request: PreparedRequestExt = resp.request
-                    if callable(condition):
-                        msg = "Retry condition matched."
-                    else:
-                        msg = f"Received status code {resp.status_code}."
+                    original_request: RequestExt = resp.request
+                    msg = (
+                        "Retry condition matched."
+                        if callable(condition)
+                        else f"Received status code {resp.status_code}."
+                    )
                     msg += f" Retrying in {retry_after} seconds..."
                     logger.warning(
                         msg,
@@ -205,22 +217,66 @@ def retry_on(
                             "request_id": original_request.request_id,
                         },
                     )
-                    time.sleep(retry_after)
-                    resp = f(*args, **kwargs)
+
+                    await asyncio.sleep(retry_after)
+                    resp = cast(ResponseExt, await f(*args, **kwargs))
                     resp.request.retried = original_request
                     num_retried += 1
-                else:
-                    break
 
-            if matches_condition(resp):
-                text = f"{num_retry} times" if num_retry > 1 else "once"
-                msg = f"Retried {text} but the request still"
-                if callable(condition):
-                    msg += " matches the condition"
-                else:
-                    msg += f" received status code {resp.status_code}"
-                logger.warning(msg)
-            return resp
+                if matches_condition(resp):
+                    text = f"{num_retry} times" if num_retry > 1 else "once"
+                    msg = f"Retried {text} but request still"
+                    msg += (
+                        " matches the condition" if callable(condition) else f" received status code {resp.status_code}"
+                    )
+                    logger.warning(msg)
+                return resp
+
+            return async_wrapper
+        else:
+
+            @wraps(f)
+            def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
+                resp = cast(ResponseExt, f(*args, **kwargs))
+                num_retried = 0
+                while num_retried < num_retry:
+                    if matches_condition(resp):
+                        if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTION"]:
+                            logger.warning(
+                                "Retry condition matched but will be skipped (safe_methods_only=True was given)"
+                            )
+                            return resp
+
+                        original_request: RequestExt = resp.request
+                        if callable(condition):
+                            msg = "Retry condition matched."
+                        else:
+                            msg = f"Received status code {resp.status_code}."
+                        msg += f" Retrying in {retry_after} seconds..."
+                        logger.warning(
+                            msg,
+                            extra={
+                                "status_code": resp.status_code,
+                                "response": process_response(resp, prettify=True),
+                                "request_id": original_request.request_id,
+                            },
+                        )
+                        time.sleep(retry_after)
+                        resp = cast(ResponseExt, f(*args, **kwargs))
+                        resp.request.retried = original_request
+                        num_retried += 1
+                    else:
+                        break
+
+                if matches_condition(resp):
+                    text = f"{num_retry} times" if num_retry > 1 else "once"
+                    msg = f"Retried {text} but the request still"
+                    if callable(condition):
+                        msg += " matches the condition"
+                    else:
+                        msg += f" received status code {resp.status_code}"
+                    logger.warning(msg)
+                return resp
 
         return wrapper
 
@@ -231,7 +287,7 @@ def retry_on(
 def get_supported_request_parameters() -> list[str]:
     """Return a list of supported request parameters"""
     custom_parameters = ["quiet", "query"]
-    requests_lib_params = inspect.signature(Session.request).parameters
+    requests_lib_params = inspect.signature(Client.request).parameters
     return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
 
 

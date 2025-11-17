@@ -8,17 +8,17 @@ from typing import TYPE_CHECKING, Any
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
-from .ext import PreparedRequestExt, ResponseExt
 from .utils import get_response_reason, parse_query_strings, process_request_body, process_response
 
 if TYPE_CHECKING:
-    from .rest_client import RestClient
+    from .ext import RequestExt, ResponseExt
+    from .rest_client import AsyncRestClient, RestClient
 
 
 logger = get_logger(__name__)
 
 
-def get_hooks(rest_client: RestClient, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
+def get_hooks(rest_client: RestClient | AsyncRestClient, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
     """Get request/response hooks"""
     return {
         "request": [_hook_factory(_log_request, quiet)],
@@ -29,13 +29,13 @@ def get_hooks(rest_client: RestClient, quiet: bool) -> dict[str, list[Callable[.
     }
 
 
-def _log_request(request: PreparedRequestExt, quiet: bool, **kwargs: Any) -> None:
+def _log_request(request: RequestExt, quiet: bool, **kwargs: Any) -> None:
     """Log API request"""
     log_data = {
         "request_id": request.request_id,
         "request": f"{request.method.upper()} {request.url}",
         "method": request.method,
-        "path": request.path_url,
+        "path": request.url,
         "payload": process_request_body(request),
         "request_headers": request.headers,
     }
@@ -45,17 +45,17 @@ def _log_request(request: PreparedRequestExt, quiet: bool, **kwargs: Any) -> Non
 
 def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool, *args: Any, **kwargs: Any) -> None:
     """Log API response"""
-    request: PreparedRequestExt = response.request
+    request: RequestExt = response.request
     log_data = {
         "request_id": request.request_id,
         "request": f"{request.method.upper()} {request.url}",
         "method": request.method,
-        "path": request.path_url,
+        "path": request.url,
         "status_code": response.status_code,
         "response_headers": response.headers,
-        "response_time": response.elapsed.total_seconds(),
+        "response_time": None if response.stream else response.elapsed.total_seconds(),
     }
-    if kwargs.get("stream") and response.ok:
+    if response.is_stream and response.is_success:
         log_data.update(response="N/A (streaming)")
     else:
         log_data.update(response=process_response(response, prettify=prettify_response_log))
@@ -64,7 +64,7 @@ def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: boo
     if reason := get_response_reason(response):
         msg += f" ({reason})"
 
-    if response.ok:
+    if response.is_success:
         if not quiet:
             logger.info(msg, extra=log_data)
     else:
@@ -76,9 +76,9 @@ def _print_api_summary(
     response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool, *args: Any, **kwargs: Any
 ) -> None:
     """Print API request/response summary to the console"""
-    request: PreparedRequestExt = response.request
+    request: RequestExt = response.request
     if quiet:
-        if not response.ok:
+        if not response.is_success:
             # Print to the console regardless of the "quiet" value
             processed_resp = process_response(response, prettify=prettify)
             err = (
@@ -104,7 +104,7 @@ def _print_api_summary(
             summary += color(f"{bullet} request_headers: {request.headers}\n", color_code=ColorCodes.CYAN)
 
         # request payload and query parameters
-        if query_strings := parse_query_strings(request.url):
+        if query_strings := parse_query_strings(str(request.url)):
             summary += color(f"{bullet} query params: {query_strings}\n", color_code=ColorCodes.CYAN)
         request_body = process_request_body(request, truncate_bytes=True)
         if request_body:
@@ -116,7 +116,7 @@ def _print_api_summary(
             summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)  # type: ignore
 
         # status_code and reason
-        status_color_code = ColorCodes.GREEN if response.ok else ColorCodes.RED
+        status_color_code = ColorCodes.GREEN if response.is_success else ColorCodes.RED
         summary += color(f"{bullet} status_code: ", color_code=ColorCodes.CYAN) + color(
             response.status_code, color_code=status_color_code
         )
@@ -126,11 +126,11 @@ def _print_api_summary(
 
         # response
         formatted_response: Any
-        if kwargs.get("stream") and response.ok:
+        if response.is_stream and response.is_success:
             formatted_response = "N/A (streaming)"
         else:
             formatted_response = process_response(response, prettify=prettify)
-        if not response.ok:
+        if not response.is_success:
             formatted_response = color(formatted_response, color_code=ColorCodes.RED)
         if formatted_response is not None:
             summary += color(f"{bullet} response: ", color_code=ColorCodes.CYAN)
@@ -141,7 +141,10 @@ def _print_api_summary(
             summary += color(f"{bullet} response_headers: {response.headers}\n", color_code=ColorCodes.CYAN)
 
         # response time
-        summary += color(f"{bullet} response_time: {response.elapsed.total_seconds()}s\n", color_code=ColorCodes.CYAN)
+        if not response.is_stream:
+            summary += color(
+                f"{bullet} response_time: {response.elapsed.total_seconds()}s\n", color_code=ColorCodes.CYAN
+            )
 
         sys.stdout.write(summary)
         sys.stdout.flush()
@@ -150,7 +153,7 @@ def _print_api_summary(
 def _hook_factory(hook_func: Callable[..., Any], *hook_args: Any, **hook_kwargs: Any) -> Callable[..., Any]:
     """Dynamically create a hook with arguments"""
 
-    def hook(hook_data: PreparedRequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
+    def hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
         return hook_func(hook_data, *hook_args, *request_args, **hook_kwargs, **request_kwargs)
 
     return hook
