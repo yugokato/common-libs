@@ -139,15 +139,12 @@ class HTTPClientMixin:
     """Shared mixin for sync and async httpx clients"""
 
     def build_request(self, *args: Any, **kwargs: Any) -> RequestExt:
-        request = cast(RequestExt, super().build_request(*args, **kwargs))  # type: ignore[misc]
-        request.request_id = str(uuid.uuid4())
-        request.start_time = None
-        request.end_time = None
-        request.retried = None
+        request = super().build_request(*args, **kwargs)  # type: ignore[misc]
+        return self._modify_request(request)
 
-        # Add request ID header
-        request.headers["X-Request-ID"] = request.request_id
-        return request
+    def _build_redirect_request(self, *args: Any, **kwargs: Any) -> RequestExt:
+        request = super()._build_redirect_request(*args, **kwargs)  # type: ignore[misc]
+        return self._modify_request(request)
 
     def call_request_hooks(self, request: RequestExt) -> None:
         """Call request hooks"""
@@ -161,6 +158,13 @@ class HTTPClientMixin:
         hooks = response.request.extensions.get("hooks", {})
         for response_hook in hooks.get("response", []):
             response_hook(response)
+
+    def _modify_request(self, request: Request) -> RequestExt:
+        request.request_id = str(uuid.uuid4())
+        request.start_time = None
+        request.end_time = None
+        request.retried = None
+        return cast(RequestExt, request)
 
     def _build_log_data(self, request: RequestExt) -> dict[str, str]:
         return {
