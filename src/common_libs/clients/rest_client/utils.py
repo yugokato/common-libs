@@ -4,12 +4,11 @@ import asyncio
 import inspect
 import json
 import time
-import urllib.parse
 from collections.abc import Awaitable, Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 from httpx import Client
@@ -18,36 +17,16 @@ from common_libs.logging import get_logger
 
 if TYPE_CHECKING:
     from .ext import JSONType, RequestExt, ResponseExt, RestResponse
-    from .rest_client import AsyncRestClient, RestClient
+    from .rest_client import ClientType
 
 
 P = ParamSpec("P")
-RT = TypeVar("RT")
-T = TypeVar("T")
+R = TypeVar("R")
 
 logger = get_logger(__name__)
 
 
 TRUNCATE_LEN = 512
-
-
-def generate_query_string(query_params: dict[str, Any]) -> str:
-    """Returns a string containing the URL query string based on the passed dictionary
-
-    :param query_params: A dictionary of key/value pairs that will be used in the API call
-    """
-
-    def convert_if_bool(val: Any) -> Any:
-        """Convert boolean to lower string"""
-        if isinstance(val, bool):
-            return str(val).lower()
-        else:
-            return val
-
-    query_string = "&".join(
-        urllib.parse.urlencode({k: convert_if_bool(v)}, doseq=True) for (k, v) in query_params.items() if v is not None
-    )
-    return query_string
 
 
 def process_request_body(
@@ -138,12 +117,11 @@ def get_response_reason(response: ResponseExt) -> str:
             return ""
 
 
-def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
+def manage_content_type(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concatenate[ClientType, P], R]:
     """Set Content-Type: application/json header by default to a request whenever appropriate"""
 
     @wraps(f)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
-        self: RestClient | AsyncRestClient = args[0]  # type: ignore[assignment]
+    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
         session_headers = self.client.headers
         request_headers = cast(dict[str, Any], kwargs.get("headers", {}))
         headers = {**session_headers, **request_headers}
@@ -153,7 +131,7 @@ def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
             self.client.headers.update({"Content-Type": "application/json"})
             content_type_set = True
         try:
-            return f(*args, **kwargs)
+            return f(self, *args, **kwargs)
         finally:
             if content_type_set:
                 self.client.headers.pop("Content-Type", None)
@@ -162,11 +140,11 @@ def manage_content_type(f: Callable[P, RT]) -> Callable[P, RT]:
 
 
 def retry_on(
-    condition: int | Sequence[int] | Callable[[RT], bool],
+    condition: int | Sequence[int] | Callable[[R], bool],
     num_retry: int = 1,
     retry_after: float = 5,
     safe_methods_only: bool = False,
-) -> Callable[[Callable[P, RT | Awaitable[RT]]], Callable[P, RT | Awaitable[RT]]]:
+) -> Callable[[Callable[P, R | Awaitable[R]]], Callable[P, R | Awaitable[R]]]:
     """Retry the request if the given condition matches
 
     :param condition: Either status code(s) or a function that takes response object as the argument
@@ -186,14 +164,14 @@ def retry_on(
             raise ValueError(f"Invalid condition: {condition}")
 
     def decorator_with_args(
-        f: Callable[P, RT | Awaitable[RT]],
-    ) -> Callable[P, RT | Awaitable[RT]]:
+        f: Callable[P, R | Awaitable[R]],
+    ) -> Callable[P, R | Awaitable[R]]:
         from .ext import ResponseExt
 
         if inspect.iscoroutinefunction(f):
 
             @wraps(f)
-            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
+            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 resp = cast(ResponseExt, await f(*args, **kwargs))
                 num_retried = 0
 
@@ -236,7 +214,7 @@ def retry_on(
         else:
 
             @wraps(f)
-            def wrapper(*args: P.args, **kwargs: P.kwargs) -> RT:
+            def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
                 resp = cast(ResponseExt, f(*args, **kwargs))
                 num_retried = 0
                 while num_retried < num_retry:

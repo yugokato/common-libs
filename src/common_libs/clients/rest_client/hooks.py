@@ -12,13 +12,13 @@ from .utils import get_response_reason, parse_query_strings, process_request_bod
 
 if TYPE_CHECKING:
     from .ext import RequestExt, ResponseExt
-    from .rest_client import AsyncRestClient, RestClient
+    from .rest_client import ClientType
 
 
 logger = get_logger(__name__)
 
 
-def get_hooks(rest_client: RestClient | AsyncRestClient, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
+def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
     """Get request/response hooks"""
     return {
         "request": [_hook_factory(_log_request, quiet)],

@@ -1,9 +1,11 @@
 from typing import Any
 
+from httpx import Timeout
+from httpx._types import TimeoutTypes
+
 from common_libs.logging import get_logger
 
 from .ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
-from .utils import generate_query_string
 
 logger = get_logger(__name__)
 
@@ -18,26 +20,26 @@ class RestClientBase:
         *,
         log_headers: bool = False,
         prettify_response_log: bool = True,
-        timeout: int | float = 30,
         async_mode: bool = False,
+        timeout: TimeoutTypes = Timeout(5.0, read=30),
+        **kwargs: Any,
     ) -> None:
         """
         :param base_url: API base url
         :param log_headers: Include request/response headers to the API summary logs
         :param prettify_response_log: Prettify response in the API summary logs
-        :param timeout: Session timeout in seconds
         :param async_mode: Use async mode
+        :param timeout: The client-level timeout settings. This can be overridden in each request
+        :param kwargs: Any other parameters to pass to the httpx client
         """
         self.base_url = base_url
-        self.timeout = timeout
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
-        self.client: SyncHTTPClient | AsyncHTTPClient
         self.async_mode = async_mode
         if self.async_mode:
-            self.client = AsyncHTTPClient(base_url=self.base_url)
+            self.client = AsyncHTTPClient(base_url=self.base_url, timeout=timeout, **kwargs)
         else:
-            self.client = SyncHTTPClient(base_url=self.base_url)
+            self.client = SyncHTTPClient(base_url=self.base_url, timeout=timeout, **kwargs)
 
     def get_bearer_token(self) -> str | None:
         """Get bear token in the current session"""
@@ -56,11 +58,3 @@ class RestClientBase:
     def unset_bear_token(self) -> None:
         """Unset bear token from the current session"""
         self.client.auth = None
-
-    def _generate_url(self, path: str, query: dict[str, Any] | None = None) -> str:
-        if not path.startswith("/"):
-            path = "/" + path
-        url = f"{self.base_url}{path}"
-        if query:
-            url += f"?{generate_query_string(query)}"
-        return url

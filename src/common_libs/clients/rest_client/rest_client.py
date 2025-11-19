@@ -1,33 +1,46 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, cast
+from functools import wraps
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 from common_libs.logging import get_logger
+from common_libs.signals import register_exit_handler
 
 from .base import RestClientBase
 from .ext import ResponseExt, RestResponse
 from .hooks import get_hooks
 from .utils import manage_content_type
 
+P = ParamSpec("P")
+R = TypeVar("R")
+ClientType = TypeVar("ClientType", "RestClient", "AsyncRestClient")
+
 logger = get_logger(__name__)
+
+
+def inject_hooks(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concatenate[ClientType, P], R]:
+    """Inject request/response hooks as extensions option to a request"""
+
+    @wraps(f)
+    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
+        assert isinstance(kwargs, dict)  # for making mypy happy
+        quiet = kwargs.pop("quiet", False)
+        kwargs.setdefault("extensions", {}).update(hooks=get_hooks(self, quiet))
+        return f(self, *args, **kwargs)
+
+    return wrapper
 
 
 class RestClient(RestClientBase):
     """Sync Rest API client"""
 
     def __init__(
-        self,
-        base_url: str,
-        *,
-        log_headers: bool = False,
-        prettify_response_log: bool = True,
-        timeout: int | float = 30,
+        self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
     ) -> None:
-        super().__init__(
-            base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, timeout=timeout
-        )
+        super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
+        register_exit_handler(self.client.close)
 
     def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make a GET API request
@@ -87,6 +100,7 @@ class RestClient(RestClientBase):
         return self._options(path, query=query_params, quiet=quiet)
 
     @contextmanager
+    @inject_hooks
     @manage_content_type
     def stream(
         self,
@@ -94,23 +108,20 @@ class RestClient(RestClientBase):
         path: str,
         /,
         *,
-        json: dict[str, Any] | list[Any] | None = None,
-        query: dict[str, Any] | None = None,
-        files: dict[str, Any] | None = None,
         quiet: bool = False,
         **raw_options: Any,
     ) -> Generator[RestResponse]:
-        """Stream an HTTP API request"""
-        with self.client.stream(
-            method.upper(),
-            self._generate_url(path, query=query),
-            json=json,
-            files=files,
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        ) as r:
+        """Stream an HTTP API request
+
+        :param method: Endpoint method
+        :param path: Endpoint path
+        :param quiet: A flag to suppress API request/response log
+        :param raw_options: Any other parameters passed directly to the httpx library
+        """
+        with self.client.stream(method.upper(), path, **raw_options) as r:
             yield RestResponse(r)
 
+    @inject_hooks
     @manage_content_type
     def _get(
         self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **raw_options: Any
@@ -122,15 +133,10 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.get(
-            self._generate_url(path),
-            params=query,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.get(path, params=query, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     def _post(
         self,
@@ -150,16 +156,10 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.post(
-            self._generate_url(path),
-            params=query,
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.post(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     def _delete(
         self,
@@ -180,17 +180,10 @@ class RestClient(RestClientBase):
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         # Use client.request() as client.delete() doesn't support json parameter
-        r = self.client.request(
-            "DELETE",
-            self._generate_url(path),
-            json=json,
-            params=query,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.request("DELETE", path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     def _put(
         self,
@@ -210,15 +203,10 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.put(
-            self._generate_url(path, query=query),
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.put(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     def _patch(
         self,
@@ -238,15 +226,10 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.patch(
-            self._generate_url(path, query=query),
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.patch(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     def _options(
         self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **raw_options: Any
@@ -258,33 +241,27 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.options(
-            self._generate_url(path, query=query),
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = self.client.options(path, params=query, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
 
 class AsyncRestClient(RestClientBase):
-    """Async Rest API client"""
+    """Async Rest API client
+
+    NOTE: Unlike the sync client, it is the user's responsibility to call `await client.aclose()` to close the client
+          before the event loop is closed.
+    """
 
     def __init__(
-        self,
-        base_url: str,
-        *,
-        log_headers: bool = False,
-        prettify_response_log: bool = True,
-        timeout: int | float = 30,
+        self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
     ) -> None:
         super().__init__(
-            base_url,
-            log_headers=log_headers,
-            prettify_response_log=prettify_response_log,
-            timeout=timeout,
-            async_mode=True,
+            base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, async_mode=True, **kwargs
         )
+
+    async def aclose(self) -> None:
+        """Close the client"""
+        await self.client.aclose()
 
     async def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make a GET API request
@@ -344,6 +321,7 @@ class AsyncRestClient(RestClientBase):
         return await self._options(path, query=query_params, quiet=quiet)
 
     @asynccontextmanager
+    @inject_hooks
     @manage_content_type
     async def stream(
         self,
@@ -351,23 +329,20 @@ class AsyncRestClient(RestClientBase):
         path: str,
         /,
         *,
-        json: dict[str, Any] | list[Any] | None = None,
-        query: dict[str, Any] | None = None,
-        files: dict[str, Any] | None = None,
         quiet: bool = False,
         **raw_options: Any,
     ) -> AsyncGenerator[RestResponse]:
-        """Stream an HTTP API request"""
-        async with self.client.stream(
-            method.upper(),
-            self._generate_url(path, query=query),
-            json=json,
-            files=files,
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        ) as r:
+        """Stream an HTTP API request
+
+        :param method: Endpoint method
+        :param path: Endpoint path
+        :param quiet: A flag to suppress API request/response log
+        :param raw_options: Any other parameters passed directly to the httpx library
+        """
+        async with self.client.stream(method.upper(), path, **raw_options) as r:
             yield RestResponse(r)
 
+    @inject_hooks
     @manage_content_type
     async def _get(
         self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **raw_options: Any
@@ -379,15 +354,10 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.get(
-            self._generate_url(path),
-            params=query,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.get(path, params=query, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     async def _post(
         self,
@@ -407,16 +377,10 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.post(
-            self._generate_url(path),
-            params=query,
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.post(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     async def _delete(
         self,
@@ -437,17 +401,10 @@ class AsyncRestClient(RestClientBase):
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         # Use client.request() as client.delete() doesn't support json parameter
-        r = await self.client.request(
-            "DELETE",
-            self._generate_url(path),
-            json=json,
-            params=query,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.request("DELETE", path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     async def _put(
         self,
@@ -467,15 +424,10 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.put(
-            self._generate_url(path, query=query),
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.put(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     async def _patch(
         self,
@@ -495,15 +447,10 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.patch(
-            self._generate_url(path, query=query),
-            json=json,
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.patch(path, params=query, json=json, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
+    @inject_hooks
     @manage_content_type
     async def _options(
         self, path: str, /, *, query: dict[str, Any] | None = None, quiet: bool = False, **raw_options: Any
@@ -515,10 +462,5 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.options(
-            self._generate_url(path, query=query),
-            timeout=(raw_options.pop("timeout", self.timeout)),
-            extensions={"hooks": get_hooks(self, quiet)},
-            **raw_options,
-        )
+        r = await self.client.options(path, params=query, **raw_options)
         return RestResponse(cast(ResponseExt, r))
