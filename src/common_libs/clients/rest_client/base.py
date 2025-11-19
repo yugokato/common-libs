@@ -32,14 +32,21 @@ class RestClientBase:
         :param timeout: The client-level timeout settings. This can be overridden in each request
         :param kwargs: Any other parameters to pass to the httpx client
         """
-        self.base_url = base_url
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
         self.async_mode = async_mode
         if self.async_mode:
-            self.client = AsyncHTTPClient(base_url=self.base_url, timeout=timeout, **kwargs)
+            self.client = AsyncHTTPClient(base_url=base_url, timeout=timeout, **kwargs)
         else:
-            self.client = SyncHTTPClient(base_url=self.base_url, timeout=timeout, **kwargs)
+            self.client = SyncHTTPClient(base_url=base_url, timeout=timeout, **kwargs)
+
+    @property
+    def base_url(self) -> str:
+        return str(self.client.base_url)
+
+    @base_url.setter
+    def base_url(self, url: str) -> None:
+        self.client.base_url = url
 
     def get_bearer_token(self) -> str | None:
         """Get bear token in the current session"""
