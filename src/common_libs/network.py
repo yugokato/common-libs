@@ -13,10 +13,10 @@ def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
         try:
-            s.connect((host, port))
-            return True
-        except (ConnectionRefusedError, OSError):
+            s.bind((host, port))
             return False
+        except OSError:
+            return True
 
 
 def find_open_port(
