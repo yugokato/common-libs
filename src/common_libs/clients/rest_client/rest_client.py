@@ -3,10 +3,9 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
-from typing import Any, Concatenate, ParamSpec, TypeVar, cast
+from typing import Any, Concatenate, ParamSpec, Self, TypeVar, cast
 
 from common_libs.logging import get_logger
-from common_libs.signals import register_exit_handler
 
 from .base import RestClientBase
 from .ext import ResponseExt, RestResponse
@@ -40,7 +39,16 @@ class RestClient(RestClientBase):
         self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
     ) -> None:
         super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
-        register_exit_handler(self.client.close)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Close the underlying httpx client"""
+        self.client.close()
 
     def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make a GET API request
@@ -188,11 +196,7 @@ class RestClient(RestClientBase):
 
 
 class AsyncRestClient(RestClientBase):
-    """Async Rest API client
-
-    NOTE: Unlike the sync client, it is the user's responsibility to call `await client.aclose()` to close the client
-          before the event loop is closed.
-    """
+    """Async Rest API client"""
 
     def __init__(
         self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
@@ -201,8 +205,14 @@ class AsyncRestClient(RestClientBase):
             base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, async_mode=True, **kwargs
         )
 
-    async def aclose(self) -> None:
-        """Close the client"""
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Close the underlying httpx client"""
         await self.client.aclose()
 
     async def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
