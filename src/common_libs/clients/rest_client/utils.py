@@ -144,6 +144,7 @@ def retry_on(
     num_retry: int = 1,
     retry_after: float = 5,
     safe_methods_only: bool = False,
+    _async_mode: bool = False,
 ) -> Callable[[Callable[P, R | Awaitable[R]]], Callable[P, R | Awaitable[R]]]:
     """Retry the request if the given condition matches
 
@@ -151,6 +152,7 @@ def retry_on(
     :param num_retry: Max number of retries
     :param retry_after: Wait time before retrying in seconds
     :param safe_methods_only: Retry will happen only for safe methods
+    :param _async_mode: Explicitly signal that the wrapped function executes async code
     """
 
     def matches_condition(r: ResponseExt) -> bool:
@@ -168,11 +170,11 @@ def retry_on(
     ) -> Callable[P, R | Awaitable[R]]:
         from .ext import ResponseExt
 
-        if inspect.iscoroutinefunction(f):
+        if _async_mode or inspect.iscoroutinefunction(f):
 
             @wraps(f)
             async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-                resp = cast(ResponseExt, await f(*args, **kwargs))
+                resp = cast(ResponseExt, await cast(Awaitable[R], f(*args, **kwargs)))
                 num_retried = 0
 
                 while num_retried < num_retry and matches_condition(resp):
@@ -197,7 +199,7 @@ def retry_on(
                     )
 
                     await asyncio.sleep(retry_after)
-                    resp = cast(ResponseExt, await f(*args, **kwargs))
+                    resp = cast(ResponseExt, await cast(Awaitable[R], f(*args, **kwargs)))
                     resp.request.retried = original_request
                     num_retried += 1
 
