@@ -39,7 +39,7 @@ def color(
 ) -> str:
     """Add ANSI color code to string
 
-    :param text: Tje original text to color
+    :param text: The original text to color
     :param color_code: ANSI color code
     :param bold: Bold text
     :param underline: Underline text

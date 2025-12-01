@@ -221,7 +221,7 @@ def retry_on(
                 num_retried = 0
                 while num_retried < num_retry:
                     if matches_condition(resp):
-                        if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTION"]:
+                        if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
                             logger.warning(
                                 "Retry condition matched but will be skipped (safe_methods_only=True was given)"
                             )

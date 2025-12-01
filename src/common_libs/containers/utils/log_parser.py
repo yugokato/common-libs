@@ -110,7 +110,7 @@ def parse_streamed_json_logs(
             try:
                 decoded_chunk = (buffered_chunks + chunk).decode("utf-8")
             except UnicodeDecodeError:
-                # The chunk is imcomplete
+                # The chunk is incomplete
                 # TODO: Check if this handling is right
                 buffered_chunks += chunk
                 continue
