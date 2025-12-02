@@ -219,14 +219,14 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
     @retry_on(503, retry_after=15, safe_methods_only=True)
     def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
+        self.call_request_hooks(request)
         request.start_time = datetime.now(tz=UTC)
         try:
-            self.call_request_hooks(request)
             resp = cast(ResponseExt, super().send(request, **kwargs))
-            self.call_response_hooks(resp)
-            return resp
         finally:
             request.end_time = datetime.now(tz=UTC)
+        self.call_response_hooks(resp)
+        return resp
 
 
 class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
@@ -249,11 +249,11 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
     @retry_on(503, retry_after=15, safe_methods_only=True)
     async def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
+        self.call_request_hooks(request)
         request.start_time = datetime.now(tz=UTC)
         try:
-            self.call_request_hooks(request)
             resp = cast(ResponseExt, await super().send(request, **kwargs))
-            self.call_response_hooks(resp)
-            return resp
         finally:
             request.end_time = datetime.now(tz=UTC)
+        self.call_response_hooks(resp)
+        return resp
