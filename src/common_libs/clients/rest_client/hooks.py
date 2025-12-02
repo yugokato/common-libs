@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from collections.abc import Callable
@@ -20,11 +21,14 @@ logger = get_logger(__name__)
 
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
     """Get request/response hooks"""
+    async_mode = rest_client.async_mode
     return {
-        "request": [_hook_factory(_log_request, quiet)],
+        "request": [_hook_factory(_log_request, async_mode, quiet)],
         "response": [
-            _hook_factory(_log_response, rest_client.prettify_response_log, quiet),
-            _hook_factory(_print_api_summary, rest_client.prettify_response_log, rest_client.log_headers, quiet),
+            _hook_factory(_log_response, async_mode, rest_client.prettify_response_log, quiet),
+            _hook_factory(
+                _print_api_summary, async_mode, rest_client.prettify_response_log, rest_client.log_headers, quiet
+            ),
         ],
     }
 
@@ -150,10 +154,17 @@ def _print_api_summary(
         sys.stdout.flush()
 
 
-def _hook_factory(hook_func: Callable[..., Any], *hook_args: Any, **hook_kwargs: Any) -> Callable[..., Any]:
+def _hook_factory(
+    hook_func: Callable[..., Any], async_mode: bool, *hook_args: Any, **hook_kwargs: Any
+) -> Callable[..., Any]:
     """Dynamically create a hook with arguments"""
 
-    def hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
+    def sync_hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
         return hook_func(hook_data, *hook_args, *request_args, **hook_kwargs, **request_kwargs)
 
-    return hook
+    async def async_hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
+        loop = asyncio.get_running_loop()
+        # Run the sync hook in a threadpool so it doesn't block
+        return await loop.run_in_executor(None, lambda: sync_hook(hook_data, *request_args, **request_kwargs))
+
+    return async_hook if async_mode else sync_hook

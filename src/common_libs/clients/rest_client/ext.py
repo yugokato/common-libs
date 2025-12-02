@@ -152,12 +152,25 @@ class HTTPClientMixin:
         for request_hook in hooks.get("request", []):
             request_hook(request)
 
+    async def acall_request_hooks(self, request: RequestExt) -> None:
+        """Call request hooks (for async mode)"""
+        hooks = request.extensions.get("hooks", {})
+        for request_hook in hooks.get("request", []):
+            await request_hook(request)
+
     def call_response_hooks(self, response: ResponseExt) -> None:
         """Call response hooks"""
         response.is_stream = not response.is_closed
         hooks = response.request.extensions.get("hooks", {})
         for response_hook in hooks.get("response", []):
             response_hook(response)
+
+    async def acall_response_hooks(self, response: ResponseExt) -> None:
+        """Call response hooks (for async mode)"""
+        response.is_stream = not response.is_closed
+        hooks = response.request.extensions.get("hooks", {})
+        for response_hook in hooks.get("response", []):
+            await response_hook(response)
 
     def _modify_request(self, request: Request) -> RequestExt:
         request.request_id = str(uuid.uuid4())
@@ -249,11 +262,11 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
     @retry_on(503, retry_after=15, safe_methods_only=True)
     async def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
-        self.call_request_hooks(request)
+        await self.acall_request_hooks(request)
         request.start_time = datetime.now(tz=UTC)
         try:
             resp = cast(ResponseExt, await super().send(request, **kwargs))
         finally:
             request.end_time = datetime.now(tz=UTC)
-        self.call_response_hooks(resp)
+        await self.acall_response_hooks(resp)
         return resp
