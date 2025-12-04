@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from common_libs.ansi_colors import ColorCodes, color
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+_hook_executor = ThreadPoolExecutor(max_workers=100)
 
 
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
@@ -33,7 +35,7 @@ def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[.
     }
 
 
-def _log_request(request: RequestExt, quiet: bool, **kwargs: Any) -> None:
+def _log_request(request: RequestExt, quiet: bool) -> None:
     """Log API request"""
     log_data = {
         "request_id": request.request_id,
@@ -47,7 +49,7 @@ def _log_request(request: RequestExt, quiet: bool, **kwargs: Any) -> None:
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool, *args: Any, **kwargs: Any) -> None:
+def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool) -> None:
     """Log API response"""
     request: RequestExt = response.request
     log_data = {
@@ -76,9 +78,7 @@ def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: boo
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(
-    response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool, *args: Any, **kwargs: Any
-) -> None:
+def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool) -> None:
     """Print API request/response summary to the console"""
     request: RequestExt = response.request
     if quiet:
@@ -159,12 +159,13 @@ def _hook_factory(
 ) -> Callable[..., Any]:
     """Dynamically create a hook with arguments"""
 
-    def sync_hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
-        return hook_func(hook_data, *hook_args, *request_args, **hook_kwargs, **request_kwargs)
+    def sync_hook(request_or_response: RequestExt | ResponseExt) -> Any:
+        return hook_func(request_or_response, *hook_args, **hook_kwargs)
 
-    async def async_hook(hook_data: RequestExt | ResponseExt, *request_args: Any, **request_kwargs: Any) -> Any:
+    async def async_hook(request_or_response: RequestExt | ResponseExt) -> Any:
+        # Run the sync hook in a threadpool so it doesn't block. Note that instead of asyncio.to_thread(), we use
+        # run_in_executor() with the custom hook_executor configured with larger max workers than the default
         loop = asyncio.get_running_loop()
-        # Run the sync hook in a threadpool so it doesn't block
-        return await loop.run_in_executor(None, lambda: sync_hook(hook_data, *request_args, **request_kwargs))
+        return await loop.run_in_executor(_hook_executor, sync_hook, request_or_response)
 
     return async_hook if async_mode else sync_hook
