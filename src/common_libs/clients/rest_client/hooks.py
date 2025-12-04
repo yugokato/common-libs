@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
-_hook_executor = ThreadPoolExecutor(max_workers=100)
+_hook_executor = ThreadPoolExecutor(max_workers=32)
 
 
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
