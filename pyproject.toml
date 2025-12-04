@@ -36,11 +36,10 @@ dev = [
     "ruff>=0.14.0,<0.15.0",
 ]
 test = [
-    "pytest>=8.0.0,<10",
+    "pytest~=9.0.0",
     "pytest-lazy-fixtures>=1.2.0,<2",
     "pytest-mock>=3.14.0",
     "pytest-smoke",
-    "pytest-subtests>=0.14.0,<0.15.0",
     "pytest-xdist[psutil]<4",
     "tox>=4.0.0,<5",
     "tox-uv>=1.0.0,<2"
