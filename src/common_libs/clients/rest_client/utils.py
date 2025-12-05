@@ -11,7 +11,7 @@ from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
-from httpx import Client
+from httpx import Client, SyncByteStream
 
 from common_libs.logging import get_logger
 
@@ -87,7 +87,10 @@ def process_response(response: ResponseExt | RestResponse, prettify: bool = Fals
         if response.is_stream:
             if response.is_success:
                 raise NotImplementedError("Should not be used for a successful stream response")
-            response.read()
+            if isinstance(response.stream, SyncByteStream):
+                response.read()
+            else:
+                asyncio.run(response.aread())
         resp = response.json()
         if prettify:
             resp = json.dumps(resp, indent=4)
