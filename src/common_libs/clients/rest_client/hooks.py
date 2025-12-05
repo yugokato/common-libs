@@ -5,6 +5,7 @@ import json
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from common_libs.ansi_colors import ColorCodes, color
@@ -21,18 +22,29 @@ logger = get_logger(__name__)
 _hook_executor = ThreadPoolExecutor(max_workers=32)
 
 
+@lru_cache
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
     """Get request/response hooks"""
     async_mode = rest_client.async_mode
     return {
-        "request": [_hook_factory(_log_request, async_mode, quiet)],
-        "response": [
-            _hook_factory(_log_response, async_mode, rest_client.prettify_response_log, quiet),
-            _hook_factory(
-                _print_api_summary, async_mode, rest_client.prettify_response_log, rest_client.log_headers, quiet
-            ),
-        ],
+        "request": [_hook_factory(request_hooks, async_mode, quiet)],
+        "response": [_hook_factory(response_hooks, async_mode, rest_client, quiet)],
     }
+
+
+def request_hooks(request: RequestExt, quiet: bool) -> None:
+    """Request hooks"""
+    _log_request(request, quiet)
+
+
+def response_hooks(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
+    """Response hooks
+
+    Note: Combining these hooks under one hook function makes sure that the response log and the API summary are
+          displayed as one message on the console for async mode.
+    """
+    _log_response(response, rest_client, quiet)
+    _print_api_summary(response, rest_client, quiet)
 
 
 def _log_request(request: RequestExt, quiet: bool) -> None:
@@ -49,7 +61,7 @@ def _log_request(request: RequestExt, quiet: bool) -> None:
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: bool) -> None:
+def _log_response(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
     """Log API response"""
     request: RequestExt = response.request
     log_data = {
@@ -64,7 +76,7 @@ def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: boo
     if response.is_stream and response.is_success:
         log_data.update(response="N/A (streaming)")
     else:
-        log_data.update(response=process_response(response, prettify=prettify_response_log))
+        log_data.update(response=process_response(response, prettify=rest_client.prettify_response_log))
 
     msg = f"response: {response.status_code}"
     if reason := get_response_reason(response):
@@ -78,8 +90,10 @@ def _log_response(response: ResponseExt, prettify_response_log: bool, quiet: boo
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(response: ResponseExt, prettify: bool, log_headers: bool, quiet: bool) -> None:
+def _print_api_summary(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
     """Print API request/response summary to the console"""
+    prettify = rest_client.prettify_response_log
+    log_headers = rest_client.log_headers
     request: RequestExt = response.request
     if quiet:
         if not response.is_success:
