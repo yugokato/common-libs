@@ -8,6 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
+from httpx import Request, Response
+
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
@@ -28,7 +30,7 @@ def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[.
     async_mode = rest_client.async_mode
     return {
         "request": [_hook_factory(request_hooks, async_mode, quiet)],
-        "response": [_hook_factory(response_hooks, async_mode, rest_client, quiet)],
+        "response": [_hook_factory(response_hooks, async_mode, quiet, rest_client)],
     }
 
 
@@ -37,31 +39,31 @@ def request_hooks(request: RequestExt, quiet: bool) -> None:
     _log_request(request, quiet)
 
 
-def response_hooks(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
+def response_hooks(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
     """Response hooks
 
     Note: Combining these hooks under one hook function makes sure that the response log and the API summary are
           displayed as one message on the console for async mode.
     """
-    _log_response(response, rest_client, quiet)
-    _print_api_summary(response, rest_client, quiet)
+    _log_response(response, quiet, rest_client)
+    _print_api_summary(response, quiet, rest_client)
 
 
 def _log_request(request: RequestExt, quiet: bool) -> None:
     """Log API request"""
-    log_data = {
-        "request_id": request.request_id,
-        "request": f"{request.method.upper()} {request.url}",
-        "method": request.method,
-        "path": request.url,
-        "payload": process_request_body(request),
-        "request_headers": request.headers,
-    }
     if not quiet:
+        log_data = {
+            "request_id": request.request_id,
+            "request": f"{request.method.upper()} {request.url}",
+            "method": request.method,
+            "path": request.url,
+            "payload": process_request_body(request),
+            "request_headers": request.headers,
+        }
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
+def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
     """Log API response"""
     request: RequestExt = response.request
     log_data = {
@@ -90,7 +92,7 @@ def _log_response(response: ResponseExt, rest_client: ClientType, quiet: bool) -
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(response: ResponseExt, rest_client: ClientType, quiet: bool) -> None:
+def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
     """Print API request/response summary to the console"""
     prettify = rest_client.prettify_response_log
     log_headers = rest_client.log_headers
@@ -169,17 +171,26 @@ def _print_api_summary(response: ResponseExt, rest_client: ClientType, quiet: bo
 
 
 def _hook_factory(
-    hook_func: Callable[..., Any], async_mode: bool, *hook_args: Any, **hook_kwargs: Any
+    hook_func: Callable[..., Any], async_mode: bool, quiet: bool, *hook_args: Any, **hook_kwargs: Any
 ) -> Callable[..., Any]:
     """Dynamically create a hook with arguments"""
 
+    def should_skip(request_or_response: Request | Response) -> bool:
+        assert isinstance(request_or_response, Request | Response)
+        if isinstance(request_or_response, Request):
+            return quiet is True
+        else:
+            return quiet and request_or_response.is_success
+
     def sync_hook(request_or_response: RequestExt | ResponseExt) -> Any:
-        return hook_func(request_or_response, *hook_args, **hook_kwargs)
+        if not should_skip(request_or_response):
+            return hook_func(request_or_response, quiet, *hook_args, **hook_kwargs)
 
     async def async_hook(request_or_response: RequestExt | ResponseExt) -> Any:
         # Run the sync hook in a threadpool so it doesn't block. Note that instead of asyncio.to_thread(), we use
         # run_in_executor() with the custom hook_executor configured with larger max workers than the default
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(_hook_executor, sync_hook, request_or_response)
+        if not should_skip(request_or_response):
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(_hook_executor, sync_hook, request_or_response)
 
     return async_hook if async_mode else sync_hook
