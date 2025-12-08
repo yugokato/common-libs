@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
@@ -39,6 +40,14 @@ class RestClient(RestClientBase):
         self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
     ) -> None:
         super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                f"{RestClient.__name__} cannot be used inside async context. Use {AsyncRestClient.__name__} instead."
+            )
 
     def __enter__(self) -> Self:
         return self
