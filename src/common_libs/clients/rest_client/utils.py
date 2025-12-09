@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import time
 from collections.abc import Awaitable, Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
@@ -21,7 +20,8 @@ if TYPE_CHECKING:
 
 
 P = ParamSpec("P")
-R = TypeVar("R")
+T = TypeVar("T")
+R = TypeVar("R", bound="RestResponse")
 
 logger = get_logger(__name__)
 
@@ -120,11 +120,11 @@ def get_response_reason(response: ResponseExt) -> str:
             return ""
 
 
-def manage_content_type(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concatenate[ClientType, P], R]:
+def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[Concatenate[ClientType, P], T]:
     """Set Content-Type: application/json header by default to a request whenever appropriate"""
 
     @wraps(f)
-    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
+    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> T:
         session_headers = self.client.headers
         request_headers = cast(dict[str, Any], kwargs.get("headers", {}))
         headers = {**session_headers, **request_headers}
@@ -158,7 +158,7 @@ def retry_on(
     :param _async_mode: Explicitly signal that the wrapped function executes async code
     """
 
-    def matches_condition(r: ResponseExt) -> bool:
+    def matches_condition(r: R) -> bool:
         if isinstance(condition, int):
             return r.status_code == condition
         elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
@@ -168,102 +168,59 @@ def retry_on(
         else:
             raise ValueError(f"Invalid condition: {condition}")
 
-    def decorator_with_args(
-        f: Callable[P, R | Awaitable[R]],
-    ) -> Callable[P, R | Awaitable[R]]:
-        from .ext import ResponseExt
+    async def _retry_on(f: Callable[P, R | Awaitable[R]], *args: P.args, **kwargs: P.kwargs) -> R:
+        resp = f(*args, **kwargs)
+        if isinstance(resp, Awaitable):
+            resp = await resp
+        num_retried = 0
+
+        while num_retried < num_retry and matches_condition(resp):
+            original_request = resp.request
+            if safe_methods_only and original_request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
+                logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
+                return resp
+
+            msg = "Retry condition matched." if callable(condition) else f"Received status code {resp.status_code}."
+            msg += f" Retrying in {retry_after} seconds..."
+            logger.warning(
+                msg,
+                extra={
+                    "status_code": resp.status_code,
+                    "response": process_response(resp, prettify=True),
+                    "request_id": original_request.request_id,
+                },
+            )
+
+            await asyncio.sleep(retry_after)
+
+            resp = f(*args, **kwargs)
+            if isinstance(resp, Awaitable):
+                resp = await resp
+            resp.request.retried = original_request
+            num_retried += 1
+
+        if matches_condition(resp):
+            text = f"{num_retry} times" if num_retry > 1 else "once"
+            msg = f"Retried {text} but request still"
+            msg += " matches the condition" if callable(condition) else f" received status code {resp.status_code}"
+            logger.warning(msg)
+        return resp
+
+    def decorator(f: Callable[P, R | Awaitable[R]]) -> Callable[P, R | Awaitable[R]]:
+        @wraps(f)
+        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            return await _retry_on(f, *args, **kwargs)
+
+        @wraps(f)
+        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            return asyncio.run(_retry_on(f, *args, **kwargs))
 
         if _async_mode or inspect.iscoroutinefunction(f):
-
-            @wraps(f)
-            async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-                resp = cast(ResponseExt, await cast(Awaitable[R], f(*args, **kwargs)))
-                num_retried = 0
-
-                while num_retried < num_retry and matches_condition(resp):
-                    if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
-                        logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
-                        return resp
-
-                    original_request: RequestExt = resp.request
-                    msg = (
-                        "Retry condition matched."
-                        if callable(condition)
-                        else f"Received status code {resp.status_code}."
-                    )
-                    msg += f" Retrying in {retry_after} seconds..."
-                    logger.warning(
-                        msg,
-                        extra={
-                            "status_code": resp.status_code,
-                            "response": process_response(resp, prettify=True),
-                            "request_id": original_request.request_id,
-                        },
-                    )
-
-                    await asyncio.sleep(retry_after)
-                    resp = cast(ResponseExt, await cast(Awaitable[R], f(*args, **kwargs)))
-                    resp.request.retried = original_request
-                    num_retried += 1
-
-                if matches_condition(resp):
-                    text = f"{num_retry} times" if num_retry > 1 else "once"
-                    msg = f"Retried {text} but request still"
-                    msg += (
-                        " matches the condition" if callable(condition) else f" received status code {resp.status_code}"
-                    )
-                    logger.warning(msg)
-                return resp
-
             return async_wrapper
         else:
+            return sync_wrapper
 
-            @wraps(f)
-            def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-                resp = cast(ResponseExt, f(*args, **kwargs))
-                num_retried = 0
-                while num_retried < num_retry:
-                    if matches_condition(resp):
-                        if safe_methods_only and resp.request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
-                            logger.warning(
-                                "Retry condition matched but will be skipped (safe_methods_only=True was given)"
-                            )
-                            return resp
-
-                        original_request: RequestExt = resp.request
-                        if callable(condition):
-                            msg = "Retry condition matched."
-                        else:
-                            msg = f"Received status code {resp.status_code}."
-                        msg += f" Retrying in {retry_after} seconds..."
-                        logger.warning(
-                            msg,
-                            extra={
-                                "status_code": resp.status_code,
-                                "response": process_response(resp, prettify=True),
-                                "request_id": original_request.request_id,
-                            },
-                        )
-                        time.sleep(retry_after)
-                        resp = cast(ResponseExt, f(*args, **kwargs))
-                        resp.request.retried = original_request
-                        num_retried += 1
-                    else:
-                        break
-
-                if matches_condition(resp):
-                    text = f"{num_retry} times" if num_retry > 1 else "once"
-                    msg = f"Retried {text} but the request still"
-                    if callable(condition):
-                        msg += " matches the condition"
-                    else:
-                        msg += f" received status code {resp.status_code}"
-                    logger.warning(msg)
-                return resp
-
-        return wrapper
-
-    return decorator_with_args
+    return decorator
 
 
 @lru_cache
