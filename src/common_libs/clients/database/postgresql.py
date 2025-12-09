@@ -149,12 +149,12 @@ class PostgreSQLClient:
             self._connection_pool = None
 
     @contextmanager
-    def transaction(self, existing_onnection: Connection = None) -> Iterator[Connection]:
+    def transaction(self, existing_connection: Connection = None) -> Iterator[Connection]:
         """Start a transaction
 
-        :param existing_onnection: Existing connection to reuse
+        :param existing_connection: Existing connection to reuse
         """
-        with self.get_connection(existing_onnection) as conn:
+        with self.get_connection(existing_connection) as conn:
             with conn.transaction():
                 yield conn
 
