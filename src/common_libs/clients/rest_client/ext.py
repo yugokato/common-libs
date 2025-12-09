@@ -161,6 +161,8 @@ class HTTPClientMixin:
     def call_response_hooks(self, response: ResponseExt) -> None:
         """Call response hooks"""
         response.is_stream = not response.is_closed
+        if response.is_stream and not response.is_success:
+            response.read()
         hooks = response.request.extensions.get("hooks", {})
         for response_hook in hooks.get("response", []):
             response_hook(response)
@@ -168,6 +170,8 @@ class HTTPClientMixin:
     async def acall_response_hooks(self, response: ResponseExt) -> None:
         """Call response hooks (for async mode)"""
         response.is_stream = not response.is_closed
+        if response.is_stream and not response.is_success:
+            await response.aread()
         hooks = response.request.extensions.get("hooks", {})
         for response_hook in hooks.get("response", []):
             await response_hook(response)
