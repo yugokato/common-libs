@@ -14,11 +14,7 @@ def freeze(obj: Any) -> Any:
 
     :param obj: Any object
     """
-    if isinstance(obj, HashableDict):
-        return type(obj)({k: freeze(v) for k, v in obj.items()})
-    elif isinstance(obj, tuple):
-        return type(obj)(freeze(x) for x in obj)
-    elif isinstance(obj, Mapping):
+    if isinstance(obj, HashableDict | Mapping):
         return HashableDict({k: freeze(v) for k, v in obj.items()})
     elif isinstance(obj, Collection) and not isinstance(obj, str | bytes):
         return tuple(freeze(x) for x in obj)
