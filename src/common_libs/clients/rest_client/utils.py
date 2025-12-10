@@ -144,7 +144,7 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
 def retry_on(
     condition: int | Sequence[int] | Callable[[R], bool],
     num_retry: int = 1,
-    retry_after: float = 5,
+    retry_after: float | int | Callable[[R], float | int] = 5,
     safe_methods_only: bool = False,
     _async_mode: bool = False,
 ) -> Callable[[Callable[P, R | Awaitable[R]]], Callable[P, R | Awaitable[R]]]:
@@ -171,6 +171,8 @@ def retry_on(
         resp = f(*args, **kwargs)
         if isinstance(resp, Awaitable):
             resp = await resp
+
+        wait_secs = retry_after(resp) if callable(retry_after) else retry_after
         num_retried = 0
 
         while num_retried < num_retry and matches_condition(resp):
@@ -180,7 +182,7 @@ def retry_on(
                 return resp
 
             msg = "Retry condition matched." if callable(condition) else f"Received status code {resp.status_code}."
-            msg += f" Retrying in {retry_after} seconds..."
+            msg += f" Retrying in {wait_secs} seconds..."
             logger.warning(
                 msg,
                 extra={
@@ -190,7 +192,7 @@ def retry_on(
                 },
             )
 
-            await asyncio.sleep(retry_after)
+            await asyncio.sleep(wait_secs)
 
             resp = f(*args, **kwargs)
             if isinstance(resp, Awaitable):
@@ -200,8 +202,8 @@ def retry_on(
 
         if matches_condition(resp):
             text = f"{num_retry} times" if num_retry > 1 else "once"
-            msg = f"Retried {text} but request still"
-            msg += " matches the condition" if callable(condition) else f" received status code {resp.status_code}"
+            msg = f"Retried {text} but request still "
+            msg += "matches the condition" if callable(condition) else f"received status code {resp.status_code}"
             logger.warning(msg)
         return resp
 
