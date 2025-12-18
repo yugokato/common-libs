@@ -25,6 +25,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries"
 ]
 dependencies = [
+    "python-dotenv~=1.2.1",
     "filelock>=3.18.0",
     "nest-asyncio2~=1.7.1"  # experimental
 ]
