@@ -92,7 +92,7 @@ def process_response(response: ResponseExt | RestResponse, prettify: bool = Fals
             #       RuntimeError: "<asyncio.locks.Event object at xxx [unset]>is bound to a different event loop" error
         resp = response.json()
         if prettify:
-            resp = json.dumps(resp, indent=4)
+            resp = json.dumps(resp, indent=2)
     except JSONDecodeError:
         resp = _decode_utf8(response.content)
 
