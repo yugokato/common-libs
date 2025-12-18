@@ -3,6 +3,7 @@ from __future__ import annotations
 import traceback
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -41,7 +42,7 @@ class RequestExt(Request):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.request_id = str(uuid.uuid4())
+        self.request_id: str
         self.start_time: datetime | None = None
         self.end_time: datetime | None = None
         self.retried: RequestExt | None = None
@@ -138,6 +139,8 @@ class RestResponse:
 class HTTPClientMixin:
     """Shared mixin for sync and async httpx clients"""
 
+    _request_id_header = "X-Request-ID"
+
     def build_request(self, *args: Any, **kwargs: Any) -> RequestExt:
         request = super().build_request(*args, **kwargs)  # type: ignore[misc]
         return self._modify_request(request)
@@ -176,8 +179,24 @@ class HTTPClientMixin:
         for response_hook in hooks.get("response", []):
             await response_hook(response)
 
+    @contextmanager
+    def set_timestamp(self, request: RequestExt) -> Generator[None]:
+        """Set request start/end time
+
+        :param request: Request
+        """
+        request.start_time = datetime.now(tz=UTC)
+        try:
+            yield
+        finally:
+            request.end_time = datetime.now(tz=UTC)
+
     def _modify_request(self, request: Request) -> RequestExt:
-        request.request_id = str(uuid.uuid4())
+        request_id = request.headers.get(self._request_id_header)
+        if not request_id:
+            request_id = str(uuid.uuid4())
+            request.headers[self._request_id_header] = request_id
+        request.request_id = request_id
         request.start_time = None
         request.end_time = None
         request.retried = None
@@ -185,7 +204,7 @@ class HTTPClientMixin:
 
     def _build_log_data(self, request: RequestExt) -> dict[str, str]:
         return {
-            "request_id": getattr(request, "request_id", None),
+            "request_id": request.request_id,
             "request": f"{request.method.upper()} {request.url}",
             "method": request.method,
             "path": str(request.url),
@@ -237,11 +256,8 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
     def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
         self.call_request_hooks(request)
-        request.start_time = datetime.now(tz=UTC)
-        try:
+        with self.set_timestamp(request):
             resp = cast(ResponseExt, super().send(request, **kwargs))
-        finally:
-            request.end_time = datetime.now(tz=UTC)
         self.call_response_hooks(resp)
         return resp
 
@@ -267,10 +283,7 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
     async def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
         await self.acall_request_hooks(request)
-        request.start_time = datetime.now(tz=UTC)
-        try:
+        with self.set_timestamp(request):
             resp = cast(ResponseExt, await super().send(request, **kwargs))
-        finally:
-            request.end_time = datetime.now(tz=UTC)
         await self.acall_response_hooks(resp)
         return resp
