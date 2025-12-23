@@ -58,7 +58,7 @@ def _log_request(request: RequestExt, quiet: bool) -> None:
             "method": request.method,
             "path": request.url,
             "payload": process_request_body(request),
-            "request_headers": request.headers,
+            "request_headers": dict(request.headers),
         }
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
@@ -72,7 +72,7 @@ def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType) -
         "method": request.method,
         "path": request.url,
         "status_code": response.status_code,
-        "response_headers": response.headers,
+        "response_headers": dict(response.headers),
         "response_time": None if response.stream else response.elapsed.total_seconds(),
     }
     if response.is_stream and response.is_success:
@@ -121,7 +121,7 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
 
         # request headers
         if log_headers:
-            summary += color(f"{bullet} request_headers: {request.headers}\n", color_code=ColorCodes.CYAN)
+            summary += color(f"{bullet} request_headers: {dict(request.headers)}\n", color_code=ColorCodes.CYAN)
 
         # request payload and query parameters
         if query_strings := parse_query_strings(str(request.url)):
@@ -158,7 +158,7 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
 
         # response headers
         if log_headers:
-            summary += color(f"{bullet} response_headers: {response.headers}\n", color_code=ColorCodes.CYAN)
+            summary += color(f"{bullet} response_headers: {dict(response.headers)}\n", color_code=ColorCodes.CYAN)
 
         # response time
         if not response.is_stream:
