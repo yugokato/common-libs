@@ -1,25 +1,56 @@
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Hashable, Mapping
 from typing import Any
 
 
 class HashableDict(dict[Any, Any]):
-    """A hashable dictionary"""
+    """A hashable dictionary
+
+    NOTE: This obj is still mutable
+    """
 
     def __hash__(self) -> int:  # type: ignore[override]
-        return hash(frozenset((k, freeze(v)) for k, v in self.items()))
+        return hash(frozenset((freeze(k), freeze(v)) for k, v in self.items()))
 
 
 def freeze(obj: Any) -> Any:
-    """Recursively convert an object to be immutable and hashable
+    """Convert the object to hashable
 
     :param obj: Any object
     """
-    if isinstance(obj, HashableDict | Mapping):
-        return HashableDict({k: freeze(v) for k, v in obj.items()})
-    elif isinstance(obj, Collection) and not isinstance(obj, str | bytes):
-        return tuple(freeze(x) for x in obj)
-    else:
-        return obj
+
+    seen: dict[int, Any] = {}
+
+    def _freeze(o: Any) -> Any:
+        obj_id = id(o)
+        if obj_id in seen:
+            return seen[obj_id]
+
+        if isinstance(o, Mapping):
+            hashable_dict = HashableDict()
+            seen[obj_id] = hashable_dict
+            for k, v in o.items():
+                hashable_dict[_freeze(k)] = _freeze(v)
+            return hashable_dict
+        elif isinstance(o, list | tuple):
+            placeholder_list: list[Any] = []
+            seen[obj_id] = placeholder_list
+            placeholder_list.extend(_freeze(x) for x in o)
+            frozen_tuple = tuple(placeholder_list)
+            seen[obj_id] = frozen_tuple
+            return frozen_tuple
+        elif isinstance(o, set):
+            placeholder_set: set[Any] = set()
+            seen[obj_id] = placeholder_set
+            placeholder_set.update(_freeze(x) for x in o)
+            frozen_set = frozenset(placeholder_set)
+            seen[obj_id] = frozen_set
+            return frozen_set
+        else:
+            if not isinstance(o, Hashable):
+                raise TypeError(f"Unhashable object of type {type(o).__name__}")
+            return o
+
+    return _freeze(obj)
 
 
 def generate_hash(obj: Any, fallback_hasher: Callable[..., Any] = repr) -> int:
