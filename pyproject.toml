@@ -27,7 +27,8 @@ classifiers = [
 dependencies = [
     "python-dotenv~=1.2.1",
     "filelock>=3.18.0",
-    "nest-asyncio2~=1.7.1"  # experimental
+    "nest-asyncio2~=1.7.1",  # experimental
+    "PyYAML~=6.0.2",
 ]
 dynamic = ["version"]
 
