@@ -9,7 +9,20 @@ class HashableDict(dict[Any, Any]):
     """
 
     def __hash__(self) -> int:  # type: ignore[override]
-        return hash(frozenset((freeze(k), freeze(v)) for k, v in self.items()))
+        return self._hash(frozenset())
+
+    def _hash(self, seen: frozenset[int]) -> int:
+        obj_id = id(self)
+        if obj_id in seen:
+            return 0  # circular reference sentinel
+        seen = seen | {obj_id}
+
+        def _h(obj: Any) -> int:
+            if isinstance(obj, HashableDict):
+                return obj._hash(seen)
+            return hash(obj)
+
+        return hash(frozenset((_h(k), _h(v)) for k, v in self.items()))
 
 
 def freeze(obj: Any) -> Any:
