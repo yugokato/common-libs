@@ -155,14 +155,14 @@ def does_log_match_filters(json_log: dict[str, Any], filters: dict[str, Any]) ->
         elif (
             isinstance(log_value, int)
             and isinstance(v, str)
-            and any(c in filter_v and filter_v.split(c)[1].strip().isdigit() for c in ["<=", ">=", "<", ">"])
+            and any(c in v and v.split(c)[1].strip().isdigit() for c in ["<=", ">=", "<", ">"])
         ):
             matched = eval(f"{log_value}{v}") is True
         elif isinstance(v, str):
             if v.startswith("NOT "):
                 matched = apply_filter(k, v.replace("NOT ", ""), log, is_negation=True)
             elif "*" in v:
-                pattern = re.escape(filter_v).replace("\\*", ".*")
+                pattern = re.escape(v).replace("\\*", ".*")
                 matched = bool(re.match(f"^{pattern}$", log_value))
             elif v.isdigit():
                 matched = any([log_value == int(v), log_value == v])
