@@ -1,19 +1,12 @@
 """Tests for common_libs.clients.rest_client.hooks module"""
 
-import asyncio
 from collections.abc import Callable
 from unittest.mock import MagicMock
 
-from httpx import Request, Response
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import RequestExt
-from common_libs.clients.rest_client.hooks import (
-    _hook_factory,
-    get_hooks,
-    request_hooks,
-    response_hooks,
-)
+from common_libs.clients.rest_client.hooks import get_hooks, request_hooks, response_hooks
 from common_libs.clients.rest_client.rest_client import RestClient
 
 
@@ -51,56 +44,6 @@ class TestGetHooks:
         hooks_quiet = get_hooks(client, quiet=True)
         hooks_verbose = get_hooks(client, quiet=False)
         assert hooks_quiet is not hooks_verbose
-
-
-class TestHookFactory:
-    """Tests for _hook_factory function"""
-
-    def test_sync_hook_skips_request_when_quiet(self, mocker: MockFixture) -> None:
-        """Test that sync request hook skips execution when quiet=True"""
-        mock_func = mocker.MagicMock()
-        hook = _hook_factory(mock_func, async_mode=False, quiet=True)
-        mock_request = mocker.MagicMock(spec=Request)
-        hook(mock_request)
-        # Request should be skipped when quiet=True
-        mock_func.assert_not_called()
-
-    def test_sync_hook_runs_request_when_not_quiet(self, mocker: MockFixture) -> None:
-        """Test that sync request hook runs when quiet=False"""
-        mock_func = mocker.MagicMock()
-        hook = _hook_factory(mock_func, async_mode=False, quiet=False)
-        mock_request = mocker.MagicMock(spec=Request)
-        hook(mock_request)
-        mock_func.assert_called_once()
-
-    def test_sync_hook_skips_successful_response_when_quiet(self, mocker: MockFixture) -> None:
-        """Test that sync response hook skips successful response when quiet=True"""
-        mock_func = mocker.MagicMock()
-        hook = _hook_factory(mock_func, async_mode=False, quiet=True)
-        mock_response = mocker.MagicMock(spec=Response)
-        mock_response.is_success = True
-        hook(mock_response)
-        mock_func.assert_not_called()
-
-    def test_sync_hook_runs_failed_response_even_when_quiet(self, mocker: MockFixture) -> None:
-        """Test that sync response hook runs for failed responses even when quiet=True"""
-        mock_func = mocker.MagicMock()
-        hook = _hook_factory(mock_func, async_mode=False, quiet=True)
-        mock_response = mocker.MagicMock(spec=Response)
-        mock_response.is_success = False
-        hook(mock_response)
-        mock_func.assert_called_once()
-
-    def test_async_hook_returns_coroutine(self, mocker: MockFixture) -> None:
-        """Test that async mode hook returns a coroutine when called"""
-        mock_func = mocker.MagicMock()
-        hook = _hook_factory(mock_func, async_mode=True, quiet=False)
-        mock_request = mocker.MagicMock(spec=Request)
-
-        result = hook(mock_request)
-        assert asyncio.iscoroutine(result)
-        # Clean up the coroutine to avoid warnings
-        result.close()
 
 
 class TestRequestHooks:

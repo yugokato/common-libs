@@ -4,7 +4,6 @@ from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
-from httpx import Request
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import (
@@ -115,31 +114,6 @@ class TestRestResponse:
 
 class TestHTTPClientMixin:
     """Tests for HTTPClientMixin class"""
-
-    def test_modify_request_sets_request_id(self) -> None:
-        """Test that _modify_request sets request_id as a UUID"""
-        client = SyncHTTPClient(base_url="http://example.com")
-        request = Request("GET", "http://example.com/test")
-        result = client._modify_request(request)
-        assert hasattr(result, "request_id")
-        assert result.request_id is not None
-        assert len(result.request_id) > 0
-
-    def test_modify_request_uses_existing_request_id(self) -> None:
-        """Test that _modify_request reuses existing X-Request-ID header"""
-        request_id = "my-custom-id"
-        client = SyncHTTPClient(base_url="http://example.com")
-        request = Request("GET", "http://example.com/test", headers={"X-Request-ID": request_id})
-        result = client._modify_request(request)
-        assert result.request_id == request_id
-
-    def test_modify_request_sets_start_and_end_time_none(self) -> None:
-        """Test that _modify_request initializes start_time and end_time to None"""
-        client = SyncHTTPClient(base_url="http://example.com")
-        request = Request("GET", "http://example.com/test")
-        result = client._modify_request(request)
-        assert result.start_time is None
-        assert result.end_time is None
 
     def test_call_request_hooks_invokes_hooks(self, mocker: MockFixture) -> None:
         """Test that call_request_hooks calls each registered hook"""

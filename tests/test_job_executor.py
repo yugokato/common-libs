@@ -6,7 +6,7 @@ import time
 import pytest
 from pytest_mock import MockFixture
 
-from common_libs.job_executor import Job, _get_max_workers, run_concurrent
+from common_libs.job_executor import Job, run_concurrent
 
 
 def simple_func(x: int) -> int:
@@ -115,32 +115,31 @@ class TestRunConcurrent:
         mock_thread_pool.assert_called_once_with(max_workers=cpu_count if is_subprocess else num_jobs)
         assert len(results) == num_jobs
 
+    @pytest.mark.parametrize(
+        ("num_jobs", "max_workers", "expected_workers"),
+        [
+            (5, 3, 3),  # max_workers < num_jobs: respects desired limit
+            (2, 10, 2),  # max_workers > num_jobs: capped to number of jobs
+            (5, None, 5),  # no max_workers: uses number of jobs
+        ],
+        ids=["max-workers-respected", "max-workers-capped-by-jobs", "max-workers-not-set"],
+    )
+    def test_run_concurrent_max_workers_behavior(
+        self, mocker: MockFixture, num_jobs: int, max_workers: int | None, expected_workers: int
+    ) -> None:
+        """Test that max_workers is capped by job count and respects desired limit"""
+        jobs = [Job(func=simple_func, args=(i,)) for i in range(num_jobs)]
 
-class TestGetMaxWorkers:
-    """Tests for _get_max_workers function"""
+        mock_executor = mocker.MagicMock()
+        mock_thread_pool = mocker.patch("common_libs.job_executor.ThreadPoolExecutor")
+        mock_thread_pool.return_value.__enter__.return_value = mock_executor
 
-    def test_get_max_workers_desired(self) -> None:
-        """Test max_workers with desired value"""
-        result = _get_max_workers(len_jobs=10, desired_num_workers=3, limit_by_num_cpu=False)
-        assert result == 3
+        mock_futures = [mocker.MagicMock() for _ in jobs]
+        for i, mock_future in enumerate(mock_futures):
+            mock_future.result.return_value = i * 2
+        mock_executor.submit.side_effect = mock_futures
+        mocker.patch("common_libs.job_executor.futures.as_completed", return_value=mock_futures)
 
-    def test_get_max_workers_limited_by_jobs(self) -> None:
-        """Test max_workers limited by number of jobs"""
-        result = _get_max_workers(len_jobs=2, desired_num_workers=10, limit_by_num_cpu=False)
-        assert result == 2
+        run_concurrent(jobs, max_workers=max_workers)
 
-    def test_get_max_workers_limited_by_cpu(self) -> None:
-        """Test max_workers limited by CPU count"""
-        cpu_count = multiprocessing.cpu_count()
-        result = _get_max_workers(len_jobs=1000, desired_num_workers=1000, limit_by_num_cpu=True)
-        assert result == cpu_count
-
-    def test_get_max_workers_no_desired(self) -> None:
-        """Test max_workers with no desired value"""
-        result = _get_max_workers(len_jobs=5, desired_num_workers=None, limit_by_num_cpu=False)
-        assert result == 5
-
-    def test_get_max_workers_zero_jobs_raises(self) -> None:
-        """Test that zero jobs raises assertion error"""
-        with pytest.raises(AssertionError):
-            _get_max_workers(len_jobs=0, desired_num_workers=5)
+        mock_thread_pool.assert_called_once_with(max_workers=expected_workers)

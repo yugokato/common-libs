@@ -1,11 +1,6 @@
 """Tests for common_libs.clients.database.postgresql module"""
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
 from unittest.mock import MagicMock
-
-from pytest_mock import MockFixture
 
 from common_libs.clients.database.postgresql import PostgreSQLClient
 
@@ -91,10 +86,10 @@ class TestPostgreSQLClientConnection:
 class TestPostgreSQLClientQueries:
     """Tests for PostgreSQLClient query methods"""
 
-    def test_select_executes_query(self, mocker: MockFixture) -> None:
+    def test_select_executes_query(self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]) -> None:
         """Test that SELECT() executes the query and returns rows"""
+        client, _, mock_cursor = mock_pg_client
         row = {"id": 1, "name": "alice"}
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-select1", "sel_u1", "sel_p1")
         mock_cursor.fetchall.return_value = [row]
 
         result = client.SELECT("* FROM users")
@@ -102,68 +97,50 @@ class TestPostgreSQLClientQueries:
         assert result[0] == row
         mock_cursor.execute.assert_called()
 
-    def test_select_prepends_select_keyword(self, mocker: MockFixture) -> None:
+    def test_select_prepends_select_keyword(
+        self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]
+    ) -> None:
         """Test that SELECT() prepends 'SELECT' if not present"""
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-select2", "sel_u2", "sel_p2")
+        client, _, mock_cursor = mock_pg_client
         mock_cursor.fetchall.return_value = []
 
         client.SELECT("id FROM users WHERE id = 1")
         call_args = mock_cursor.execute.call_args[0]
         assert call_args[0].upper().startswith("SELECT")
 
-    def test_delete_executes_query(self, mocker: MockFixture) -> None:
+    def test_delete_executes_query(self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]) -> None:
         """Test that DELETE() executes the query and returns rowcount"""
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-delete1", "del_u1", "del_p1")
+        client, _, mock_cursor = mock_pg_client
         mock_cursor.rowcount = 3
 
         result = client.DELETE("FROM users WHERE active = false")
         assert result == 3
         mock_cursor.execute.assert_called()
 
-    def test_update_executes_query(self, mocker: MockFixture) -> None:
+    def test_update_executes_query(self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]) -> None:
         """Test that UPDATE() executes the query and returns rowcount"""
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-update1", "upd_u1", "upd_p1")
+        client, _, mock_cursor = mock_pg_client
         mock_cursor.rowcount = 5
 
         result = client.UPDATE("users SET active = true WHERE id = 1")
         assert result == 5
         mock_cursor.execute.assert_called()
 
-    def test_insert_executes_query(self, mocker: MockFixture) -> None:
+    def test_insert_executes_query(self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]) -> None:
         """Test that INSERT() executes the query and returns rowcount"""
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-insert1", "ins_u1", "ins_p1")
+        client, _, mock_cursor = mock_pg_client
         mock_cursor.rowcount = 1
 
         result = client.INSERT("INTO users (name) VALUES ('bob')")
         assert result == 1
         mock_cursor.execute.assert_called()
 
-    def test_delete_with_returning_returns_value(self, mocker: MockFixture) -> None:
+    def test_delete_with_returning_returns_value(
+        self, mock_pg_client: tuple[PostgreSQLClient, MagicMock, MagicMock]
+    ) -> None:
         """Test that DELETE with RETURNING clause returns the fetched value"""
-        client, _, mock_cursor = self._setup_mock_client(mocker, "pg-delete2", "del_u2", "del_p2")
+        client, _, mock_cursor = mock_pg_client
         mock_cursor.fetchone.return_value = {"id": 42}
 
         result = client.DELETE("FROM users WHERE id = 42 RETURNING id")
         assert result == 42
-
-    def _setup_mock_client(
-        self, mocker: MockFixture, host: str, user: str, password: str
-    ) -> tuple[PostgreSQLClient, Any, Any]:
-        """Helper to set up a client with mocked connection and cursor"""
-        client = PostgreSQLClient(host=host, port=5432, db_name="querydb", user=user, password=password, connect=True)
-
-        mock_conn = mocker.MagicMock()
-        mock_cursor = mocker.MagicMock()
-
-        @contextmanager
-        def mock_get_connection(existing_connection: Any = None) -> Iterator[Any]:
-            yield mock_conn
-
-        @contextmanager
-        def mock_get_cursor(connection: Any, /, *, logging: bool = False, row_factory: Any = None) -> Iterator[Any]:
-            yield mock_cursor
-
-        mocker.patch.object(client, "get_connection", side_effect=mock_get_connection)
-        mocker.patch.object(client, "get_cursor", side_effect=mock_get_cursor)
-
-        return client, mock_conn, mock_cursor

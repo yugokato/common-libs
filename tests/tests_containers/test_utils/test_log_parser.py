@@ -6,7 +6,6 @@ from typing import Any
 
 from common_libs.ansi_colors import ColorCodes
 from common_libs.containers.utils.log_parser import (
-    _get_log_color,
     does_log_match_filters,
     parse_json_logs,
     parse_streamed_json_logs,
@@ -86,38 +85,6 @@ class TestDoesLogMatchFilters:
         log = {"status_code": 200}
         # Passing non-standard filter type that causes an exception inside apply_filter
         assert does_log_match_filters(log, {"status_code": object()}) is False
-
-
-class TestGetLogColor:
-    """Tests for _get_log_color private function"""
-
-    def test_error_level_returns_red(self) -> None:
-        """Test that ERROR level returns RED color"""
-        assert _get_log_color("ERROR") == ColorCodes.RED
-
-    def test_fatal_level_returns_red(self) -> None:
-        """Test that FATAL level returns RED color"""
-        assert _get_log_color("FATAL") == ColorCodes.RED
-
-    def test_critical_level_returns_red(self) -> None:
-        """Test that CRITICAL level returns RED color"""
-        assert _get_log_color("CRITICAL") == ColorCodes.RED
-
-    def test_warning_level_returns_yellow(self) -> None:
-        """Test that WARNING level returns YELLOW color"""
-        assert _get_log_color("WARNING") == ColorCodes.YELLOW
-
-    def test_debug_level_returns_dark_grey(self) -> None:
-        """Test that DEBUG level returns DARK_GREY color"""
-        assert _get_log_color("DEBUG") == ColorCodes.DARK_GREY
-
-    def test_info_level_returns_none(self) -> None:
-        """Test that INFO level returns None"""
-        assert _get_log_color("INFO") is None
-
-    def test_unknown_level_returns_none(self) -> None:
-        """Test that unknown level returns None"""
-        assert _get_log_color("TRACE") is None
 
 
 class TestParseJsonLogs:

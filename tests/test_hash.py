@@ -54,7 +54,7 @@ class TestFreeze:
         """Test freezing a dictionary"""
         result = freeze({"a": 1, "b": 2})
         assert isinstance(result, HashableDict)
-        assert hash(result)  # Should be hashable
+        assert isinstance(hash(result), int)
 
     def test_freeze_list(self) -> None:
         """Test freezing a list"""

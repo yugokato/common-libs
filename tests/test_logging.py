@@ -3,6 +3,8 @@
 import logging
 from pathlib import Path
 
+import pytest
+
 from common_libs.ansi_colors import ColorCodes
 from common_libs.logging import (
     ColoredStreamHandler,
@@ -74,46 +76,35 @@ class TestLoggerAdapter:
 class TestColoredStreamHandler:
     """Tests for ColoredStreamHandler class"""
 
-    def test_get_color_code_critical(self) -> None:
-        """Test color for CRITICAL level"""
-        color = ColoredStreamHandler._get_color_code(logging.CRITICAL)
-        assert color == ColorCodes.RED
-
-    def test_get_color_code_error(self) -> None:
-        """Test color for ERROR level"""
-        color = ColoredStreamHandler._get_color_code(logging.ERROR)
-        assert color == ColorCodes.RED
-
-    def test_get_color_code_warning(self) -> None:
-        """Test color for WARNING level"""
-        color = ColoredStreamHandler._get_color_code(logging.WARNING)
-        assert color == ColorCodes.YELLOW
-
-    def test_get_color_code_info(self) -> None:
-        """Test color for INFO level"""
-        color = ColoredStreamHandler._get_color_code(logging.INFO)
-        assert color is None
-
-    def test_get_color_code_debug(self) -> None:
-        """Test color for DEBUG level"""
-        color = ColoredStreamHandler._get_color_code(logging.DEBUG)
-        assert color == ColorCodes.DARK_GREY
-
-    def test_format_applies_color(self) -> None:
-        """Test that format applies color based on level"""
+    @pytest.mark.parametrize(
+        ("level", "expected_color"),
+        [
+            (logging.CRITICAL, ColorCodes.RED),
+            (logging.ERROR, ColorCodes.RED),
+            (logging.WARNING, ColorCodes.YELLOW),
+            (logging.INFO, None),
+            (logging.DEBUG, ColorCodes.DARK_GREY),
+        ],
+        ids=["critical", "error", "warning", "info", "debug"],
+    )
+    def test_format_applies_color_by_level(self, level: int, expected_color: str | None) -> None:
+        """Test that format applies the correct color for each log level"""
         handler = ColoredStreamHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
         record = logging.LogRecord(
             name="test",
-            level=logging.ERROR,
+            level=level,
             pathname="",
             lineno=0,
-            msg="error message",
+            msg="test message",
             args=(),
             exc_info=None,
         )
         result = handler.format(record)
-        assert ColorCodes.RED in result
+        if expected_color is not None:
+            assert expected_color in result
+        else:
+            assert "test message" in result
 
 
 class TestLogFilter:

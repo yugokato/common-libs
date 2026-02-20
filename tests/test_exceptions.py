@@ -16,10 +16,8 @@ class TestNotFound:
     def test_not_found_message(self) -> None:
         """Test NotFound exception message"""
         message = "test message"
-        try:
+        with pytest.raises(NotFound, match=message):
             raise NotFound(message)
-        except NotFound as e:
-            assert str(e) == message
 
 
 class TestCommandError:

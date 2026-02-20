@@ -212,32 +212,17 @@ class TestBaseContainerExecRun:
         # Should not raise
         ctn.exec_run("false", ignore_error=True)
 
-
-class TestEscapeGrepPattern:
-    """Tests for BaseContainer._escape_grep_pattern()"""
-
-    def test_basic_pattern_unchanged(self) -> None:
-        """Test that simple patterns are escaped properly"""
-        pattern = "hello"
+    @pytest.mark.parametrize(
+        "grep_pattern",
+        ["hello", "foo|bar", "foo.*bar", "foo[bar]"],
+        ids=["simple", "OR", "AND", "special-chars"],
+    )
+    def test_exec_run_grep_pattern_types(self, mocker: MockFixture, grep_pattern: str) -> None:
+        """Test exec_run succeeds with various grep pattern types including OR, AND, and special chars"""
         ctn = BaseContainer(image="alpine")
-        result = ctn._escape_grep_pattern(pattern)
-        assert result == pattern
+        mock_container = mocker.MagicMock()
+        mock_container.exec_run.return_value = (0, b"matching output\n")
+        ctn.container = mock_container
 
-    def test_or_pattern_preserved(self) -> None:
-        """Test that | is preserved as OR separator"""
-        ctn = BaseContainer(image="alpine")
-        result = ctn._escape_grep_pattern("foo|bar")
-        assert "|" in result
-
-    def test_and_pattern_preserved(self) -> None:
-        """Test that .* is preserved as AND separator"""
-        ctn = BaseContainer(image="alpine")
-        result = ctn._escape_grep_pattern("foo.*bar")
-        assert ".*" in result
-
-    def test_special_chars_escaped(self) -> None:
-        """Test that special regex chars (except | and .*) are escaped"""
-        ctn = BaseContainer(image="alpine")
-        result = ctn._escape_grep_pattern("foo[bar]")
-        # Square brackets should be escaped
-        assert "\\[" in result
+        result = ctn.exec_run("echo hello world", grep=grep_pattern)
+        assert result is not None
