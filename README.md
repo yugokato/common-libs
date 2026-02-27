@@ -1,6 +1,7 @@
 Common Libraries (common-libs)
 ======================
 
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![test](https://github.com/yugokato/common-libs/actions/workflows/test.yml/badge.svg)](https://github.com/yugokato/common-libs/actions/workflows/test.yml)
 [![Code style ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://docs.astral.sh/ruff/)
 
