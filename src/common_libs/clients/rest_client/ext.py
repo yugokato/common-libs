@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import traceback
 import uuid
-from collections.abc import AsyncGenerator, Awaitable, Generator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any, Literal, TypeAlias, Union, cast
+from typing import Any, Literal, TypeAlias, cast
 
 from httpx import AsyncClient, Request, Response, TimeoutException, TransportError
 from httpx import Client as SyncClient
@@ -18,7 +18,6 @@ from common_libs.logging import get_logger
 from .utils import process_response, retry_on
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
-APIResponse: TypeAlias = Union["RestResponse", Awaitable["RestResponse"]]
 
 logger = get_logger(__name__)
 
