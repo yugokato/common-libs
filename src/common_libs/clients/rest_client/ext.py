@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Generic, Literal, TypeAlias, TypeVar, cast
 
 from httpx import AsyncClient, Request, Response, TimeoutException, TransportError
 from httpx import Client as SyncClient
@@ -18,6 +18,7 @@ from common_libs.logging import get_logger
 from .utils import process_response, retry_on
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
+T = TypeVar("T", bound=JSONType)
 
 logger = get_logger(__name__)
 
@@ -56,7 +57,7 @@ class ResponseExt(Response):
 
 
 @dataclass(frozen=True)
-class RestResponse:
+class RestResponse(Generic[T]):
     """Response class that wraps the httpx Response object"""
 
     # raw response returned from httpx lib
@@ -64,7 +65,7 @@ class RestResponse:
 
     request_id: str = field(init=False)
     status_code: int = field(init=False)
-    response: JSONType = field(init=False)
+    response: T = field(init=False)
     response_time: float = field(init=False)
     request: RequestExt = field(init=False)
     ok: bool = field(init=False)

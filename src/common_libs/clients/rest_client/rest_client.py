@@ -9,7 +9,7 @@ from typing import Any, Concatenate, ParamSpec, Self, TypeVar, cast
 from common_libs.logging import get_logger
 
 from .base import RestClientBase
-from .ext import ResponseExt, RestResponse
+from .ext import JSONType, ResponseExt, RestResponse
 from .hooks import get_hooks
 from .utils import manage_content_type
 
@@ -59,7 +59,7 @@ class RestClient(RestClientBase):
         """Close the underlying httpx client"""
         self.client.close()
 
-    def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse[JSONType]:
         """Make a GET API request
 
         :param path: Endpoint path
@@ -70,7 +70,7 @@ class RestClient(RestClientBase):
 
     def post(
         self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
-    ) -> RestResponse:
+    ) -> RestResponse[JSONType]:
         """Make a POST API request
 
         :param path: Endpoint path
@@ -80,7 +80,7 @@ class RestClient(RestClientBase):
         """
         return self._post(path, json=payload, files=files, quiet=quiet)
 
-    def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a DELETE API request
 
         :param path: Endpoint path
@@ -89,7 +89,7 @@ class RestClient(RestClientBase):
         """
         return self._delete(path, json=payload, quiet=quiet)
 
-    def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a PUT API request
 
         :param path: Endpoint path
@@ -98,7 +98,7 @@ class RestClient(RestClientBase):
         """
         return self._put(path, json=payload, quiet=quiet)
 
-    def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a PATCH API request
 
         :param path: Endpoint path
@@ -107,7 +107,7 @@ class RestClient(RestClientBase):
         """
         return self._patch(path, json=payload, quiet=quiet)
 
-    def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse[JSONType]:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
@@ -119,7 +119,9 @@ class RestClient(RestClientBase):
     @contextmanager
     @inject_hooks
     @manage_content_type
-    def stream(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> Generator[RestResponse]:
+    def stream(
+        self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any
+    ) -> Generator[RestResponse[JSONType]]:
         """Stream an HTTP API request
 
         :param method: Endpoint method
@@ -132,7 +134,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of get()
 
         :param path: Endpoint path
@@ -144,7 +146,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of post()
 
         :param path: Endpoint path
@@ -156,7 +158,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of delete()
 
         :param path: Endpoint path
@@ -169,7 +171,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of put()
 
         :param path: Endpoint path
@@ -181,7 +183,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of patch()
 
         :param path: Endpoint path
@@ -193,7 +195,7 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of options()
 
         :param path: Endpoint path
@@ -224,7 +226,7 @@ class AsyncRestClient(RestClientBase):
         """Close the underlying httpx client"""
         await self.client.aclose()
 
-    async def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    async def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse[JSONType]:
         """Make a GET API request
 
         :param path: Endpoint path
@@ -235,7 +237,7 @@ class AsyncRestClient(RestClientBase):
 
     async def post(
         self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
-    ) -> RestResponse:
+    ) -> RestResponse[JSONType]:
         """Make a POST API request
 
         :param path: Endpoint path
@@ -245,7 +247,7 @@ class AsyncRestClient(RestClientBase):
         """
         return await self._post(path, json=payload, files=files, quiet=quiet)
 
-    async def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a DELETE API request
 
         :param path: Endpoint path
@@ -254,7 +256,7 @@ class AsyncRestClient(RestClientBase):
         """
         return await self._delete(path, json=payload, quiet=quiet)
 
-    async def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a PUT API request
 
         :param path: Endpoint path
@@ -263,7 +265,7 @@ class AsyncRestClient(RestClientBase):
         """
         return await self._put(path, json=payload, quiet=quiet)
 
-    async def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse[JSONType]:
         """Make a PATCH API request
 
         :param path: Endpoint path
@@ -272,7 +274,7 @@ class AsyncRestClient(RestClientBase):
         """
         return await self._patch(path, json=payload, quiet=quiet)
 
-    async def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    async def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse[JSONType]:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
@@ -286,7 +288,7 @@ class AsyncRestClient(RestClientBase):
     @manage_content_type
     async def stream(
         self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any
-    ) -> AsyncGenerator[RestResponse]:
+    ) -> AsyncGenerator[RestResponse[JSONType]]:
         """Stream an HTTP API request
 
         :param method: Endpoint method
@@ -299,7 +301,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of get()
 
         :param path: Endpoint path
@@ -311,7 +313,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of post()
 
         :param path: Endpoint path
@@ -323,7 +325,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of delete()
 
         :param path: Endpoint path
@@ -336,7 +338,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of put()
 
         :param path: Endpoint path
@@ -348,7 +350,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of patch()
 
         :param path: Endpoint path
@@ -360,7 +362,7 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse[JSONType]:
         """Low-level function of options()
 
         :param path: Endpoint path
