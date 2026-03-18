@@ -22,6 +22,7 @@ class RestClientBase:
         prettify_response_log: bool = True,
         async_mode: bool = False,
         timeout: TimeoutTypes = Timeout(5.0, read=30),
+        http2: bool = True,
         **kwargs: Any,
     ) -> None:
         """
@@ -30,15 +31,16 @@ class RestClientBase:
         :param prettify_response_log: Prettify response in the API summary logs
         :param async_mode: Use async mode
         :param timeout: The client-level timeout settings. This can be overridden in each request
+        :param http2: Use http/2 (will fall back to http/1.1 if the server doesn't support it)
         :param kwargs: Any other parameters to pass to the httpx client
         """
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
         self.async_mode = async_mode
         if self.async_mode:
-            self.client = AsyncHTTPClient(base_url=base_url, timeout=timeout, **kwargs)
+            self.client = AsyncHTTPClient(base_url=base_url, timeout=timeout, http2=http2, **kwargs)
         else:
-            self.client = SyncHTTPClient(base_url=base_url, timeout=timeout, **kwargs)
+            self.client = SyncHTTPClient(base_url=base_url, timeout=timeout, http2=http2, **kwargs)
 
     @property
     def base_url(self) -> str:
