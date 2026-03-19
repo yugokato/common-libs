@@ -266,3 +266,34 @@ class TestAsyncRestClient:
             pass
 
         mock_close.assert_called_once()
+
+    async def test_http3_requires_https(self) -> None:
+        """Test that http3() raises ValueError for non-https URLs"""
+        with pytest.raises(ValueError, match="URL schema must be https"):
+            async with AsyncRestClient.http3("http://example.com"):
+                pass
+
+    async def test_http3_import_error(self, mocker: MockFixture) -> None:
+        """Test that http3() raises RuntimeError when aioquic is not installed"""
+        mocker.patch.dict("sys.modules", {"aioquic": None, "aioquic.asyncio.client": None})
+
+        with pytest.raises(RuntimeError, match="http3 dependency"):
+            async with AsyncRestClient.http3("https://example.com"):
+                pass
+
+    async def test_http3_connects_and_yields_client(self, mocker: MockFixture) -> None:
+        """Test that http3() yields an AsyncRestClient with the H3 transport"""
+        from common_libs.clients.rest_client.http3 import H3Transport
+
+        mock_transport = mocker.MagicMock(spec=H3Transport)
+        mock_transport.aclose = mocker.AsyncMock()
+
+        mock_connect_ctx = mocker.MagicMock()
+        mock_connect_ctx.__aenter__ = mocker.AsyncMock(return_value=mock_transport)
+        mock_connect_ctx.__aexit__ = mocker.AsyncMock(return_value=False)
+
+        mocker.patch("aioquic.asyncio.client.connect", return_value=mock_connect_ctx)
+
+        async with AsyncRestClient.http3("https://example.com") as client:
+            assert isinstance(client, AsyncRestClient)
+            assert isinstance(client.client._transport, H3Transport)

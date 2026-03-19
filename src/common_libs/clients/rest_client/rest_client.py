@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
 from typing import Any, Concatenate, ParamSpec, Self, TypeVar, cast
+from urllib.parse import urlparse
 
 from common_libs.logging import get_logger
 
@@ -215,6 +216,40 @@ class AsyncRestClient(RestClientBase):
         super().__init__(
             base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, async_mode=True, **kwargs
         )
+
+    @classmethod
+    @asynccontextmanager
+    async def http3(cls, base_url: str, **kwargs: Any) -> AsyncGenerator[AsyncRestClient]:
+        """Async context manager that yields an AsyncRestClient connected over HTTP/3.
+
+        This is experimental/temporary until the official HTTP/3 support is added to httpx
+
+        :param base_url: Base URL of the API (must use the https scheme).
+        :param kwargs: Additional keyword arguments forwarded to AsyncRestClient
+        """
+        try:
+            from aioquic.asyncio.client import connect
+            from aioquic.h3.connection import H3_ALPN
+            from aioquic.quic.configuration import QuicConfiguration
+
+            from .http3 import H3Transport
+        except ImportError:
+            raise RuntimeError(
+                "HTTP/3 client requires optional http3 dependency: Install with 'pip install common_libs[http3]'"
+            )
+
+        parsed = urlparse(base_url)
+        if parsed.scheme != "https":
+            raise ValueError(f"The URL schema must be https, not {parsed.scheme}")
+
+        async with connect(
+            parsed.hostname,
+            parsed.port or 443,
+            configuration=QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN),
+            create_protocol=H3Transport,
+        ) as transport:
+            async with cls(base_url, transport=transport, **kwargs) as client:
+                yield client
 
     async def __aenter__(self) -> Self:
         return self
