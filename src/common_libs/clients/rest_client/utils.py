@@ -172,10 +172,9 @@ def retry_on(
         if isinstance(resp, Awaitable):
             resp = await resp
 
-        wait_secs = retry_after(resp) if callable(retry_after) else retry_after
         num_retried = 0
-
         while num_retried < num_retry and matches_condition(resp):
+            wait_secs = retry_after(resp) if callable(retry_after) else retry_after
             original_request = resp.request
             if safe_methods_only and original_request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
                 logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
