@@ -1,10 +1,14 @@
 """Tests for common_libs.clients.rest_client.utils module"""
 
+import inspect
 import json
+from collections.abc import Callable
 from http import HTTPStatus
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pytest import FixtureRequest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import RestResponse
@@ -15,6 +19,7 @@ from common_libs.clients.rest_client.utils import (
     parse_query_strings,
     process_request_body,
     process_response,
+    retry_on,
 )
 
 
@@ -232,3 +237,324 @@ class TestGetSupportedRequestParameters:
         result = get_supported_request_parameters()
         assert "quiet" in result
         assert "query" in result
+
+
+class TestRetryOn:
+    """Tests for retry_on decorator"""
+
+    @pytest.fixture(params=["sync", "async"])
+    def mode(self, request: FixtureRequest) -> str:
+        """Fixture parametrized over sync and async inner function modes."""
+        return request.param
+
+    @pytest.fixture(autouse=True)
+    def _mock_async_sleep(self, mocker: MockFixture) -> MagicMock:
+        return mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+
+    async def invoke(self, f: Callable[[], Any]) -> Any:
+        """Call function and await the result if it is a coroutine."""
+        result = f()
+        if inspect.iscoroutine(result):
+            return await result
+        return result
+
+    async def test_no_retry_when_condition_doesnt_match(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that no retry happens when condition doesn't match"""
+        status_to_retry = 500
+        mock_resp = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_resp
+
+        else:
+
+            @retry_on(status_to_retry)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_resp
+
+        result = await self.invoke(f)
+        assert result is mock_resp
+        assert call_count == 1
+
+    async def test_retries_on_matching_int_condition(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that retry happens when condition matches an int status code"""
+        status_to_retry = 500
+        mock_err = mock_response_factory(status_to_retry)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        else:
+
+            @retry_on(status_to_retry)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert call_count == 2
+
+    async def test_retries_on_matching_list_condition(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that retry happens when condition matches a list of status codes"""
+        status_to_retry = 502
+        mock_err = mock_response_factory(status_to_retry)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on([status_to_retry, 503])
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        else:
+
+            @retry_on([status_to_retry, 503])
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert call_count == 2
+
+    async def test_retries_on_callable_condition(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that retry happens when callable condition returns True"""
+        status_to_retry = 503
+        condition = lambda r: r.status_code >= 500
+        mock_err = mock_response_factory(status_to_retry)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(condition)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        else:
+
+            @retry_on(condition)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert call_count == 2
+
+    async def test_retries_with_num_retry(self, mock_response_factory: Callable[..., MagicMock], mode: str) -> None:
+        """Test that retry stops after num_retry attempts"""
+        status_to_retry = 500
+        mock_err = mock_response_factory(status_to_retry)
+        call_count = 0
+        num_retry = 3
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry, num_retry=num_retry)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err
+
+        else:
+
+            @retry_on(status_to_retry, num_retry=num_retry)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err
+
+        await self.invoke(f)
+        assert call_count == num_retry + 1  # 1 initial + 3 retries
+
+    async def test_retries_with_safe_methods_only_option(
+        self, mocker: MockFixture, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that safe_methods_only=True skips retry for non-safe methods like POST"""
+        status_to_retry = 500
+        mock_logger = mocker.patch("common_libs.clients.rest_client.utils.logger")
+        mock_resp = mock_response_factory(status_to_retry)
+        mock_resp.request.method = "POST"
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry, safe_methods_only=True)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_resp
+
+        else:
+
+            @retry_on(status_to_retry, safe_methods_only=True)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_resp
+
+        result = await self.invoke(f)
+        assert result is mock_resp
+        assert call_count == 1
+        assert mock_logger.warning.call_count == 1
+        assert "safe_methods_only" in mock_logger.warning.call_args[0][0]
+
+    async def test_retry_after_callable_not_called_when_condition_doesnt_match(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that retry_after callable is not called when condition doesn't match"""
+        status_to_retry = 429
+        mock_retry_after: MagicMock = MagicMock()
+        mock_200 = mock_response_factory(200)
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry, retry_after=mock_retry_after)
+            def f() -> Any:
+                return mock_200
+
+        else:
+
+            @retry_on(status_to_retry, retry_after=mock_retry_after)
+            async def f() -> Any:
+                return mock_200
+
+        await self.invoke(f)
+        mock_retry_after.assert_not_called()
+
+    async def test_retry_after_callable_called_when_condition_matches(
+        self, _mock_async_sleep: MagicMock, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that retry_after callable is called and its return value is used for asyncio.sleep"""
+        status_to_retry = 429
+        retry_after = 10
+        mock_err = mock_response_factory(status_to_retry)
+        mock_err.headers = {"Retry-After": retry_after}
+        retry_after_func = lambda r: r.headers["Retry-After"]
+        if mode == "sync":
+
+            @retry_on(status_to_retry, retry_after=retry_after_func)
+            def f() -> Any:
+                return mock_err
+
+        else:
+
+            @retry_on(status_to_retry, retry_after=retry_after_func)
+            async def f() -> Any:
+                return mock_err
+
+        await self.invoke(f)
+        _mock_async_sleep.assert_called_once_with(retry_after)
+
+    async def test_retry_after_static_value_used_for_sleep(
+        self, _mock_async_sleep: MockFixture, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that static retry_after value is passed directly to asyncio.sleep"""
+        status_to_retry = 500
+        retry_after = 30
+        mock_err = mock_response_factory(status_to_retry)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry, retry_after=retry_after)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        else:
+
+            @retry_on(status_to_retry, retry_after=retry_after)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        await self.invoke(f)
+        _mock_async_sleep.assert_called_once_with(retry_after)
+
+    async def test_retried_response_chains_retried_attribute(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that the retried response's request.retried points to the original request"""
+        status_to_retry = 500
+        mock_err = mock_response_factory(status_to_retry)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(status_to_retry)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        else:
+
+            @retry_on(status_to_retry)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                return mock_err if call_count == 1 else mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert mock_ok.request.retried is mock_err.request
+
+    async def test_invalid_condition_raises_value_error(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that an invalid condition type raises ValueError"""
+        mock_resp = mock_response_factory(500)
+        invalid_condition: Any = "invalid_condition"
+
+        if mode == "sync":
+
+            @retry_on(invalid_condition)
+            def f() -> Any:
+                return mock_resp
+
+        else:
+
+            @retry_on(invalid_condition)
+            async def f() -> Any:
+                return mock_resp
+
+        with pytest.raises(ValueError, match="Invalid condition: "):
+            await self.invoke(f)
