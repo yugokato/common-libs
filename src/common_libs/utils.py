@@ -239,3 +239,26 @@ def is_decorator_with_args(decorator: Any) -> bool:
         return wrapper_func_result is not dummy_orig_func_result
     else:
         return False
+
+
+def truncate_text(text: str, max_len: int = 100, max_lines: int = 5) -> str:
+    """Truncate a long text
+
+    :param text: The original text
+    :param max_len: Max length for each text line
+    :param max_lines: Max text lines
+    """
+    truncated_part = "..."
+    new_text = ""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if i:
+            new_text += "\n"
+        if i == max_lines:
+            new_text += truncated_part
+            break
+        if len(line + truncated_part) > max_len:
+            new_text += line[:max_len] + truncated_part
+        else:
+            new_text += line
+    return new_text
