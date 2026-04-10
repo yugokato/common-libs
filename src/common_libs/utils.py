@@ -233,7 +233,7 @@ def is_decorator_with_args(decorator: Any) -> bool:
             return False
 
         # Call the wrapper function to see if the returned value is from the dummy function. If the decorator takes
-        # arugments, the returned value should be another wrapper function
+        # arguments, the returned value should be another wrapper function
         wrapper_args, wrapper_kwargs = generate_callable_args(wrapper_func)
         wrapper_func_result = wrapper_func(*wrapper_args, **wrapper_kwargs)
         return wrapper_func_result is not dummy_orig_func_result
