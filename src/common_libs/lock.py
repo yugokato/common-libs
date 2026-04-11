@@ -23,7 +23,7 @@ class Lock:
             os.makedirs(LOCK_DIR, exist_ok=True)
         self._lock_file = LOCK_DIR / self.LOCK_FILE.format(name=self.name)
         self._lock = FileLock(self._lock_file, timeout=timeout, is_singleton=is_singleton, **kwargs)
-        weakref.finalize(self, self._cleanup)
+        weakref.finalize(self, _cleanup, self._lock, self._lock_file)
 
     def __enter__(self) -> Self:
         if not self._lock.is_locked:
@@ -40,10 +40,11 @@ class Lock:
         if not self._lock.is_locked:
             logger.debug(f"Released lock: {self._lock_file.name}")
 
-    def _cleanup(self) -> None:
-        try:
-            with self._lock:
-                self._lock.__del__()
-                self._lock_file.unlink(missing_ok=True)
-        except FileNotFoundError:
-            pass
+
+def _cleanup(lock_obj: FileLock, lock_file: Path) -> None:
+    try:
+        with lock_obj:
+            lock_obj.__del__()
+            lock_file.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
