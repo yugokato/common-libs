@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from pytest_mock import MockFixture
 
-from common_libs.naming import clean_obj_name
 from common_libs.utils import (
+    dedup,
     is_decorator_with_args,
     list_items,
     log_section,
@@ -145,38 +145,37 @@ class TestLogSection:
         assert "-" in call_arg
 
 
-class TestCleanObjName:
-    """Tests for clean_obj_name function"""
+class TestDedup:
+    """Tests for dedup function"""
 
-    def test_clean_obj_name_valid(self) -> None:
-        """Test valid name passes through"""
-        name = "valid_name"
-        assert clean_obj_name(name) == name
+    def test_no_duplicates(self) -> None:
+        """Test that unique values are returned unchanged"""
+        assert dedup(1, 2, 3) == (1, 2, 3)
 
-    def test_clean_obj_name_spaces(self) -> None:
-        """Test spaces are replaced with underscores"""
-        assert clean_obj_name("my name") == "my_name"
+    def test_duplicates_removed_order_preserved(self) -> None:
+        """Test that duplicates are removed while preserving the original order"""
+        assert dedup(1, 2, 1, 3, 2) == (1, 2, 3)
 
-    def test_clean_obj_name_special_chars(self) -> None:
-        """Test special characters are replaced"""
-        assert clean_obj_name("my@name#here") == "my_name_here"
+    def test_strings(self) -> None:
+        """Test deduplication with string values"""
+        assert dedup("a", "b", "a", "c") == ("a", "b", "c")
 
-    def test_clean_obj_name_starts_with_digit(self) -> None:
-        """Test name starting with digit gets underscore prefix"""
-        result = clean_obj_name("123name")
-        assert result.startswith("_")
-        assert "123" in result
+    def test_mixed_hashable_types(self) -> None:
+        """Test deduplication with mixed hashable types"""
+        assert dedup(1, "a", (1, 2), 1, "a") == (1, "a", (1, 2))
 
-    def test_clean_obj_name_reserved_keyword(self) -> None:
-        """Test reserved keywords get underscore prefix"""
-        assert clean_obj_name("class") == "_class"
-        assert clean_obj_name("def") == "_def"
-        assert clean_obj_name("import") == "_import"
+    def test_empty(self) -> None:
+        """Test that no arguments returns an empty tuple"""
+        assert dedup() == ()
 
-    def test_clean_obj_name_multiple_special(self) -> None:
-        """Test multiple consecutive special chars become single underscore"""
-        result = clean_obj_name("a@@b##c")
-        assert result == "a_b_c"
+    def test_single_object(self) -> None:
+        """Test that a single object is returned as a one-element tuple"""
+        assert dedup(42) == (42,)
+
+    def test_returns_tuple(self) -> None:
+        """Test that the return type is always a tuple"""
+        result = dedup(1, 2, 3)
+        assert isinstance(result, tuple)
 
 
 class TestWaitUntil:
