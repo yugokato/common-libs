@@ -1,17 +1,17 @@
 import inspect
-import keyword
 import os
-import re
 import sys
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Hashable, Iterable
 from copy import deepcopy
-from typing import Any
+from typing import Any, TypeVar
 
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
 logger = get_logger(__name__)
+
+HashableT = TypeVar("HashableT", bound=Hashable)
 
 
 def prompt_confirmation(prompt: str, yes: str = "Y", no: str = "N") -> None:
@@ -112,25 +112,6 @@ def log_section(string: str, color_code: str = ColorCodes.GREEN, sub_section: bo
             msg += format_line(line_msg)
 
         logger.info(f"\n{section}\n{msg}{section}", color_code=color_code)
-
-
-def clean_obj_name(name: str) -> str:
-    """Convert the name to a legal Python object name
-
-    - Illegal values will be converted to "_" (multiple illegal values in a row will be converted to single "_")
-    - If the name starts with a number, "_" will be added at the beginning
-
-    :param name: The original value
-    """
-    pattern_illegal_chars = r"\W+|^(?=\d)"
-    has_illegal_chars = re.search(pattern_illegal_chars, name)
-    is_reserved_name = keyword.iskeyword(name)
-    if has_illegal_chars:
-        name = re.sub(pattern_illegal_chars, "_", name)
-    elif is_reserved_name:
-        name = f"_{name}"
-
-    return name
 
 
 def wait_until(
@@ -262,3 +243,17 @@ def truncate_text(text: str, max_len: int = 100, max_lines: int = 5) -> str:
         else:
             new_text += line
     return new_text
+
+
+def dedup(*objects: HashableT) -> tuple[HashableT, ...]:
+    """Deduplicate objects by retaining the order
+
+    :param objects: Objects to perform deduplication with
+    """
+    seen = set()
+    deduped = []
+    for obj in objects:
+        if obj not in seen:
+            deduped.append(obj)
+            seen.add(obj)
+    return tuple(deduped)

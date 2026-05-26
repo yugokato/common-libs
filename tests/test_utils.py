@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from pytest_mock import MockFixture
 
+from common_libs.naming import clean_obj_name
 from common_libs.utils import (
-    clean_obj_name,
     is_decorator_with_args,
     list_items,
     log_section,
