@@ -63,6 +63,6 @@ class RestClientBase:
         """Set bear token to the current session"""
         self.client.auth = BearerAuth(token)
 
-    def unset_bear_token(self) -> None:
-        """Unset bear token from the current session"""
+    def unset_bearer_token(self) -> None:
+        """Unset bearer token from the current session"""
         self.client.auth = None

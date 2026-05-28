@@ -63,9 +63,9 @@ class TestRestClientBase:
         assert isinstance(client.client.auth, BearerAuth)
         assert client.client.auth.token == token
 
-    def test_unset_bear_token(self) -> None:
-        """Test that unset_bear_token removes auth from the client"""
+    def test_unset_bearer_token(self) -> None:
+        """Test that unset_bearer_token removes auth from the client"""
         client = RestClientBase("http://example.com")
         client.set_bearer_token("some-token")
-        client.unset_bear_token()
+        client.unset_bearer_token()
         assert client.client.auth is None
