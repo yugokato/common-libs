@@ -11,7 +11,7 @@ import pytest
 from pytest import FixtureRequest
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.ext import RestResponse
+from common_libs.clients.rest_client.ext import RequestExt, RestResponse
 from common_libs.clients.rest_client.utils import (
     get_response_reason,
     get_supported_request_parameters,
@@ -20,6 +20,7 @@ from common_libs.clients.rest_client.utils import (
     process_request_body,
     process_response,
     retry_on,
+    set_request_to_exception,
 )
 
 
@@ -374,16 +375,16 @@ class TestRetryOn:
         assert result is mock_ok
         assert call_count == 2
 
-    async def test_retries_with_num_retry(self, mock_response_factory: Callable[..., MagicMock], mode: str) -> None:
-        """Test that retry stops after num_retry attempts"""
+    async def test_retries_with_num_retries(self, mock_response_factory: Callable[..., MagicMock], mode: str) -> None:
+        """Test that retry stops after num_retries attempts"""
         status_to_retry = 500
         mock_err = mock_response_factory(status_to_retry)
         call_count = 0
-        num_retry = 3
+        num_retries = 3
 
         if mode == "sync":
 
-            @retry_on(status_to_retry, num_retry=num_retry)
+            @retry_on(status_to_retry, num_retries=num_retries)
             def f() -> Any:
                 nonlocal call_count
                 call_count += 1
@@ -391,14 +392,14 @@ class TestRetryOn:
 
         else:
 
-            @retry_on(status_to_retry, num_retry=num_retry)
+            @retry_on(status_to_retry, num_retries=num_retries)
             async def f() -> Any:
                 nonlocal call_count
                 call_count += 1
                 return mock_err
 
         await self.invoke(f)
-        assert call_count == num_retry + 1  # 1 initial + 3 retries
+        assert call_count == num_retries + 1  # 1 initial + 3 retries
 
     async def test_retries_with_safe_methods_only_option(
         self, mocker: MockFixture, mock_response_factory: Callable[..., MagicMock], mode: str
@@ -537,6 +538,42 @@ class TestRetryOn:
         assert result is mock_ok
         assert mock_ok.request.retried is mock_err.request
 
+    async def test_retried_exception_chains_retried_attribute(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that a successful retry after an exception sets request.retried to the original request"""
+        original_request = MagicMock(spec=RequestExt)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    exc = ValueError("transient error")
+                    set_request_to_exception(exc, original_request)
+                    raise exc
+                return mock_ok
+
+        else:
+
+            @retry_on(ValueError)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    exc = ValueError("transient error")
+                    set_request_to_exception(exc, original_request)
+                    raise exc
+                return mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert mock_ok.request.retried is original_request
+
     async def test_invalid_condition_raises_value_error(
         self, mock_response_factory: Callable[..., MagicMock], mode: str
     ) -> None:
@@ -558,3 +595,328 @@ class TestRetryOn:
 
         with pytest.raises(ValueError, match="Invalid condition: "):
             await self.invoke(f)
+
+    async def test_retries_on_single_exception_class(self, mode: str) -> None:
+        """Test that retry happens when a single exception class is raised"""
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient error")
+                return "ok"
+
+        else:
+
+            @retry_on(ValueError)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient error")
+                return "ok"
+
+        result = await self.invoke(f)
+        assert result == "ok"
+        assert call_count == 2
+
+    async def test_retries_on_sequence_of_exception_classes(self, mode: str) -> None:
+        """Test that retry happens when condition is a list of exception classes and a matching one is raised"""
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on([ValueError, RuntimeError])
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise RuntimeError("transient error")
+                return "ok"
+
+        else:
+
+            @retry_on([ValueError, RuntimeError])
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise RuntimeError("transient error")
+                return "ok"
+
+        result = await self.invoke(f)
+        assert result == "ok"
+        assert call_count == 2
+
+    async def test_no_retry_on_non_matching_exception(self, mode: str) -> None:
+        """Test that non-matching exceptions propagate immediately without retry"""
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise RuntimeError("unexpected error")
+
+        else:
+
+            @retry_on(ValueError)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise RuntimeError("unexpected error")
+
+        with pytest.raises(RuntimeError, match="unexpected error"):
+            await self.invoke(f)
+        assert call_count == 1
+
+    async def test_exception_retry_exhausted_reraises(self, mode: str) -> None:
+        """Test that after num_retries retries, the last exception is re-raised"""
+        call_count = 0
+        num_retries = 2
+
+        if mode == "sync":
+
+            @retry_on(ValueError, num_retries=num_retries)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise ValueError("persistent error")
+
+        else:
+
+            @retry_on(ValueError, num_retries=num_retries)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise ValueError("persistent error")
+
+        with pytest.raises(ValueError, match="persistent error"):
+            await self.invoke(f)
+        assert call_count == num_retries + 1  # 1 initial + num_retries retries
+
+    async def test_exception_retry_with_static_retry_after(self, _mock_async_sleep: MagicMock, mode: str) -> None:
+        """Test that static retry_after value is passed to asyncio.sleep on exception retry"""
+        retry_after = 10
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError, retry_after=retry_after)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient")
+                return "ok"
+
+        else:
+
+            @retry_on(ValueError, retry_after=retry_after)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient")
+                return "ok"
+
+        await self.invoke(f)
+        _mock_async_sleep.assert_called_once_with(retry_after)
+
+    async def test_exception_retry_with_callable_retry_after(self, _mock_async_sleep: MagicMock, mode: str) -> None:
+        """Test that callable retry_after receives the raised exception and its return value is used for sleep"""
+        expected_wait = 15
+        retry_after_func: MagicMock = MagicMock(return_value=expected_wait)
+        call_count = 0
+        raised_exc = ValueError("transient error")
+
+        if mode == "sync":
+
+            @retry_on(ValueError, retry_after=retry_after_func)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise raised_exc
+                return "ok"
+
+        else:
+
+            @retry_on(ValueError, retry_after=retry_after_func)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise raised_exc
+                return "ok"
+
+        await self.invoke(f)
+        retry_after_func.assert_called_once_with(raised_exc)
+        _mock_async_sleep.assert_called_once_with(expected_wait)
+
+    async def test_safe_methods_only_skips_exception_retry_for_non_safe_method(
+        self, mocker: MockFixture, mode: str
+    ) -> None:
+        """Test that safe_methods_only=True skips exception retry for non-safe methods like POST"""
+        mock_logger = mocker.patch("common_libs.clients.rest_client.utils.logger")
+        mock_request = MagicMock(spec=RequestExt)
+        mock_request.method = "POST"
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError, safe_methods_only=True)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                exc = ValueError("transient error")
+                set_request_to_exception(exc, mock_request)
+                raise exc
+
+        else:
+
+            @retry_on(ValueError, safe_methods_only=True)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                exc = ValueError("transient error")
+                set_request_to_exception(exc, mock_request)
+                raise exc
+
+        with pytest.raises(ValueError, match="transient error"):
+            await self.invoke(f)
+        assert call_count == 1
+        assert mock_logger.warning.call_count == 1
+        assert "safe_methods_only" in mock_logger.warning.call_args[0][0]
+
+    async def test_safe_methods_only_retries_on_exception_for_safe_method(
+        self, mock_response_factory: Callable[..., MagicMock], mode: str
+    ) -> None:
+        """Test that safe_methods_only=True allows exception retry for safe methods like GET"""
+        mock_request = MagicMock(spec=RequestExt)
+        mock_request.method = "GET"
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError, safe_methods_only=True)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    exc = ValueError("transient error")
+                    set_request_to_exception(exc, mock_request)
+                    raise exc
+                return mock_ok
+
+        else:
+
+            @retry_on(ValueError, safe_methods_only=True)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    exc = ValueError("transient error")
+                    set_request_to_exception(exc, mock_request)
+                    raise exc
+                return mock_ok
+
+        result = await self.invoke(f)
+        assert result is mock_ok
+        assert call_count == 2
+
+    async def test_safe_methods_only_skips_exception_retry_when_no_request_attached(
+        self, mocker: MockFixture, mode: str
+    ) -> None:
+        """Test that safe_methods_only=True skips exception retry when no request is attached to the exception"""
+        mock_logger = mocker.patch("common_libs.clients.rest_client.utils.logger")
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(ValueError, safe_methods_only=True)
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise ValueError("transient error")  # no set_original_request — method is unknown
+
+        else:
+
+            @retry_on(ValueError, safe_methods_only=True)
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise ValueError("transient error")  # no set_original_request — method is unknown
+
+        with pytest.raises(ValueError, match="transient error"):
+            await self.invoke(f)
+        assert call_count == 1
+        mock_logger.warning.assert_called_once()
+        assert "safe_methods_only" in mock_logger.warning.call_args[0][0]
+
+    async def test_callable_condition_retries_on_exception(self, mode: str) -> None:
+        """Test that a callable condition can match a raised exception and trigger a retry"""
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(lambda x: isinstance(x, ValueError))
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient error")
+                return "ok"
+
+        else:
+
+            @retry_on(lambda x: isinstance(x, ValueError))
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise ValueError("transient error")
+                return "ok"
+
+        result = await self.invoke(f)
+        assert result == "ok"
+        assert call_count == 2
+
+    async def test_callable_condition_does_not_retry_on_exception_for_response_only_callable(self, mode: str) -> None:
+        """Test that a response-only callable that errors when given an exception does not cause a retry"""
+        call_count = 0
+
+        if mode == "sync":
+
+            @retry_on(lambda r: r.status_code == 503)  # type: ignore[union-attr]
+            def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise RuntimeError("unexpected error")
+
+        else:
+
+            @retry_on(lambda r: r.status_code == 503)  # type: ignore[union-attr]
+            async def f() -> Any:
+                nonlocal call_count
+                call_count += 1
+                raise RuntimeError("unexpected error")
+
+        with pytest.raises(RuntimeError, match="unexpected error"):
+            await self.invoke(f)
+        assert call_count == 1
+
+    def test_empty_sequence_condition_raises_value_error(self) -> None:
+        """Test that passing an empty sequence as condition raises ValueError immediately"""
+        with pytest.raises(ValueError, match="condition sequence must not be empty"):
+
+            @retry_on([])
+            def f() -> Any:
+                return "ok"

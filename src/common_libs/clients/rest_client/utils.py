@@ -27,6 +27,8 @@ logger = get_logger(__name__)
 
 
 TRUNCATE_LEN = 512
+ORIGINAL_REQUEST_ATTR = "_original_request"
+SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
 
 
 def process_request_body(
@@ -142,68 +144,125 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
 
 
 def retry_on(
-    condition: int | Sequence[int] | Callable[[R], bool],
-    num_retry: int = 1,
-    retry_after: float | int | Callable[[R], float | int] = 5,
+    condition: int | type[Exception] | Sequence[int] | Sequence[type[Exception]] | Callable[[R | Exception], bool],
+    num_retries: int = 1,
+    retry_after: float | int | Callable[[R | Exception], float | int] = 5,
     safe_methods_only: bool = False,
     _async_mode: bool = False,
 ) -> Callable[[Callable[P, R | Awaitable[R]]], Callable[P, R | Awaitable[R]]]:
     """Retry the request if the given condition matches
 
-    :param condition: Either status code(s) or a function that takes response object as the argument
-    :param num_retry: Max number of retries
-    :param retry_after: Wait time before retrying in seconds
-    :param safe_methods_only: Retry will happen only for safe methods
+    :param condition: Status code(s), exception class(es), or a callable taking the response or exception to retry on.
+                      When a callable is passed, it receives the response on HTTP-level retries, or the raised
+                      exception when an exception-based retry occurs; the callable must handle both cases gracefully.
+    :param num_retries: Max number of retries
+    :param retry_after: Wait time before retrying in seconds; when the condition matched on an exception, a callable
+                        retry_after receives the raised exception instead of a response
+    :param safe_methods_only: Retry only for safe HTTP methods (GET/HEAD/OPTIONS). For exception-based retries,
+                              when the method cannot be determined (no request attached), the retry is skipped.
     :param _async_mode: Explicitly signal that the wrapped function executes async code
     """
+    exc_types: tuple[type[Exception], ...] | None = None
+    if isinstance(condition, type) and issubclass(condition, Exception):
+        condition = (condition,)
 
-    def matches_condition(r: R) -> bool:
+    if isinstance(condition, (tuple, list)):
+        if not condition:
+            raise ValueError("condition sequence must not be empty")
+        if all(isinstance(x, type) and issubclass(x, Exception) for x in condition):
+            exc_types = tuple(condition)
+
+    # True when condition is a plain callable (not an exception class or sequence of exception classes)
+    is_callable_condition = callable(condition) and not isinstance(condition, type)
+
+    def matches_condition(resp: R | None, exc: Exception | None) -> bool:
+        if exc is not None:
+            if exc_types is not None:
+                return True  # already type-filtered in call()
+            # callable condition — try to evaluate against the exception
+            if is_callable_condition:
+                try:
+                    return bool(condition(exc))  # type: ignore
+                except Exception:
+                    return False
+            return False  # non-callable condition cannot match an exception; unreachable in practice
+        # exc is None — evaluate against the response
+        if exc_types is not None:
+            return False  # exception-based condition but no exception raised (e.g. after a successful retry)
+        assert resp is not None
         if isinstance(condition, int):
-            return r.status_code == condition
+            return resp.status_code == condition
         elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
-            return r.status_code in condition
-        elif callable(condition):
-            return condition(r)
+            return resp.status_code in condition
+        elif is_callable_condition:
+            return condition(resp)  # type: ignore
         else:
             raise ValueError(f"Invalid condition: {condition}")
 
     async def _retry_on(f: Callable[P, R | Awaitable[R]], *args: P.args, **kwargs: P.kwargs) -> R:
-        resp = f(*args, **kwargs)
-        if isinstance(resp, Awaitable):
-            resp = await resp
+        async def call() -> tuple[R | None, Exception | None]:
+            """Run f once. Return (response, None), or (None, exc) when a matching exception is caught."""
+            try:
+                r = f(*args, **kwargs)
+                if inspect.isawaitable(r):
+                    r = await r
+                return r, None
+            except Exception as e:
+                if exc_types is not None:
+                    if not isinstance(e, exc_types):
+                        raise
+                elif not is_callable_condition:
+                    raise
+                return None, e
 
+        resp, exc = await call()
         num_retried = 0
-        while num_retried < num_retry and matches_condition(resp):
-            wait_secs = retry_after(resp) if callable(retry_after) else retry_after
-            original_request = resp.request
-            if safe_methods_only and original_request.method.upper() not in ["GET", "HEAD", "OPTIONS"]:
-                logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
-                return resp
-
-            msg = "Retry condition matched." if callable(condition) else f"Received status code {resp.status_code}."
-            msg += f" Retrying in {wait_secs} seconds..."
-            logger.warning(
-                msg,
-                extra={
+        log_extra: dict[str, Any]
+        while num_retried < num_retries and matches_condition(resp, exc):
+            if exc is not None:
+                request = get_request_from_exception(exc)  # may be None when no request was injected
+                if safe_methods_only and (request is None or request.method.upper() not in SAFE_HTTP_METHODS):
+                    logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
+                    raise exc
+                wait_secs = retry_after(exc) if callable(retry_after) else retry_after
+                msg = "Retry condition matched." if callable(condition) else f"Exception {type(exc).__name__} raised."
+                log_extra = {"exception": f"{type(exc)}: {exc!s}"}
+            else:
+                assert resp is not None
+                request = resp.request
+                if safe_methods_only and request.method.upper() not in SAFE_HTTP_METHODS:
+                    logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
+                    return resp
+                wait_secs = retry_after(resp) if callable(retry_after) else retry_after
+                msg = "Retry condition matched." if callable(condition) else f"Received status code {resp.status_code}."
+                log_extra = {
                     "status_code": resp.status_code,
                     "response": process_response(resp, prettify=True),
-                    "request_id": original_request.request_id,
-                },
-            )
+                    "request_id": request.request_id,
+                }
+            msg += f" Retrying in {wait_secs} seconds..."
+            logger.warning(msg, extra=log_extra)
 
             await asyncio.sleep(wait_secs)
 
-            resp = f(*args, **kwargs)
-            if isinstance(resp, Awaitable):
-                resp = await resp
-            resp.request.retried = original_request
+            resp, exc = await call()
+            if exc is None and request is not None:
+                assert resp is not None
+                resp.request.retried = request
             num_retried += 1
 
-        if matches_condition(resp):
-            text = f"{num_retry} times" if num_retry > 1 else "once"
-            msg = f"Retried {text} but request still "
-            msg += "matches the condition" if callable(condition) else f"received status code {resp.status_code}"
-            logger.warning(msg)
+        if num_retried > 0 and matches_condition(resp, exc):
+            text = f"{num_retries} times" if num_retries > 1 else "once"
+            if exc is not None:
+                reason = f"raised {type(exc).__name__}"
+            else:
+                assert resp is not None
+                reason = "matches the condition" if callable(condition) else f"received status code {resp.status_code}"
+            logger.warning(f"Retried {text} but request still {reason}")
+
+        if exc is not None:
+            raise exc
+        assert resp is not None
         return resp
 
     def decorator(f: Callable[P, R | Awaitable[R]]) -> Callable[P, R | Awaitable[R]]:
@@ -229,6 +288,23 @@ def get_supported_request_parameters() -> list[str]:
     custom_parameters = ["quiet", "query"]
     requests_lib_params = inspect.signature(Client.request).parameters
     return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
+
+
+def set_request_to_exception(exc: BaseException, request: RequestExt) -> None:
+    """Attach the original request to an exception so retry_on can chain it via request.retried
+
+    :param exc: Exception to attach the request to
+    :param request: Original request being sent when the exception was raised
+    """
+    setattr(exc, ORIGINAL_REQUEST_ATTR, request)
+
+
+def get_request_from_exception(exc: BaseException) -> RequestExt | None:
+    """Return the original request attached to an exception by set_original_request, if any
+
+    :param exc: Exception possibly carrying an attached request
+    """
+    return getattr(exc, ORIGINAL_REQUEST_ATTR, None)
 
 
 def _decode_utf8(obj: Any) -> Any:

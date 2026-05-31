@@ -15,7 +15,7 @@ from httpx._auth import Auth
 
 from common_libs.logging import get_logger
 
-from .utils import process_response, retry_on
+from .utils import process_response, retry_on, set_request_to_exception
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
 T = TypeVar("T", bound=JSONType)
@@ -249,6 +249,7 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
                 else:
                     raise
         except Exception as e:
+            set_request_to_exception(e, request)  # let retry_on chain request.retried on exception retries
             self._handle_error(e, request, log_data)
             raise
 
@@ -276,6 +277,7 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
                 else:
                     raise
         except Exception as e:
+            set_request_to_exception(e, request)  # let retry_on chain request.retried on exception retries
             self._handle_error(e, request, log_data)
             raise
 

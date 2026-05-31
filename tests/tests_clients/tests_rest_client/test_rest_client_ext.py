@@ -1,17 +1,19 @@
 """Tests for common_libs.clients.rest_client.ext module"""
 
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import (
+    AsyncHTTPClient,
     BearerAuth,
     RequestExt,
     RestResponse,
     SyncHTTPClient,
 )
+from common_libs.clients.rest_client.utils import get_request_from_exception
 
 
 class TestBearerAuth:
@@ -146,3 +148,36 @@ class TestHTTPClientMixin:
         assert log_data["request_id"] == request_id
         assert "GET" in log_data["request"]
         assert log_data["method"] == "GET"
+
+
+class TestSyncHTTPClient:
+    """Tests for SyncHTTPClient.send()"""
+
+    def test_send_injects_original_request_on_exception(self, mocker: MockFixture) -> None:
+        """Test that send() attaches the original request to a raised exception via set_original_request"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("GET", "/users")
+        mock_send = mocker.patch.object(client, "_send", side_effect=RuntimeError("error"))
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        with pytest.raises(RuntimeError, match="error") as exc_info:
+            client.send(request)
+
+        assert get_request_from_exception(exc_info.value) is request
+        mock_send.assert_called_once()
+
+
+class TestAsyncHTTPClient:
+    """Tests for AsyncHTTPClient.send()"""
+
+    async def test_send_injects_original_request_on_exception(self, mocker: MockFixture) -> None:
+        """Test that send() attaches the original request to a raised exception via set_original_request"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = client.build_request("GET", "/users")
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, side_effect=RuntimeError("error"))
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            with pytest.raises(RuntimeError, match="error") as exc_info:
+                await client.send(request)
+
+        assert get_request_from_exception(exc_info.value) is request
