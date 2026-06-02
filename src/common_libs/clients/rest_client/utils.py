@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 P = ParamSpec("P")
 T = TypeVar("T")
-R = TypeVar("R", bound="RestResponse[JSONType]")
+R = TypeVar("R", bound="RestResponse")
 
 logger = get_logger(__name__)
 
@@ -79,7 +79,7 @@ def mask_sensitive_value(body: Any, content_type: str) -> Any:
     return body
 
 
-def process_response(response: ResponseExt | RestResponse[JSONType], prettify: bool = False) -> JSONType:
+def process_response(response: ResponseExt | RestResponse, prettify: bool = False) -> JSONType:
     """Get json-encoded content of a response if possible, otherwise return content of the response"""
     from .ext import RestResponse
 
