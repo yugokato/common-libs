@@ -895,7 +895,7 @@ class TestRetryOn:
 
         if mode == "sync":
 
-            @retry_on(lambda r: r.status_code == 503)  # type: ignore[union-attr]
+            @retry_on(lambda r: r.status_code == 503)
             def f() -> Any:
                 nonlocal call_count
                 call_count += 1
@@ -903,7 +903,7 @@ class TestRetryOn:
 
         else:
 
-            @retry_on(lambda r: r.status_code == 503)  # type: ignore[union-attr]
+            @retry_on(lambda r: r.status_code == 503)
             async def f() -> Any:
                 nonlocal call_count
                 call_count += 1
