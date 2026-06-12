@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any
@@ -10,7 +9,9 @@ from aioquic.h3.connection import H3Connection
 from aioquic.h3.events import DataReceived, H3Event, Headers, HeadersReceived
 from aioquic.quic.events import QuicEvent
 
-logger = logging.getLogger("client")
+from common_libs.logging import get_logger
+
+logger = get_logger(__name__)
 
 # https://github.com/aiortc/aioquic/blob/6d36838d008c2202c337142fa07e8bf80e96bac8/examples/httpx_client.py
 
