@@ -132,7 +132,7 @@ class TestLock:
                 raise FileNotFoundError("simulated missing directory")
             return real_acquire(*args, **kwargs)
 
-        lock._lock.acquire = acquire_with_one_failure  # type: ignore[method-assign]
+        lock._lock.acquire = acquire_with_one_failure
 
         with lock:
             pass
@@ -245,7 +245,7 @@ class TestAsyncLock:
             raise RuntimeError("injected failure")
 
         lock_instance = AsyncLock(lock_name)
-        lock_instance._lock.acquire = always_fail  # type: ignore[method-assign]
+        lock_instance._lock.acquire = always_fail
 
         # Capture the asyncio lock before __aenter__ to keep a strong ref across the failure;
         # without it the WeakValueDictionary could drop the entry and _get_asyncio_lock() would
@@ -273,7 +273,7 @@ class TestAsyncLock:
                 raise FileNotFoundError("simulated missing directory")
             return await real_acquire(*args, **kwargs)
 
-        lock._lock.acquire = acquire_with_one_failure  # type: ignore[method-assign]
+        lock._lock.acquire = acquire_with_one_failure
 
         async with lock:
             pass
