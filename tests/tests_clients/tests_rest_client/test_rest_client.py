@@ -66,24 +66,24 @@ class TestRestClient:
             asyncio.run(_create())
 
     def test_get_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that get() calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that get() calls the underlying HTTP client via request() and returns response as a RestResponse"""
         client = RestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_get = mocker.patch.object(client.client, "get", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = client.get("/users", quiet=True)
-        mock_httpx_get.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     def test_post_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that post() calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that post() calls the underlying HTTP client via request() and returns response as a RestResponse"""
         client = RestClient("http://example.com")
         mock_response = mock_response_factory(201)
-        mock_httpx_post = mocker.patch.object(client.client, "post", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = client.post("/users", quiet=True, name="alice")
-        mock_httpx_post.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 201
 
@@ -99,35 +99,35 @@ class TestRestClient:
         assert r.status_code == 200
 
     def test_put_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that put() calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that put() calls the underlying HTTP client via request() and returns response as a RestResponse"""
         client = RestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_put = mocker.patch.object(client.client, "put", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = client.put("/users/1", quiet=True, name="bob")
-        mock_httpx_put.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     def test_patch_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that patch() calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that patch() calls the underlying HTTP client via request() and returns response as a RestResponse"""
         client = RestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_patch = mocker.patch.object(client.client, "patch", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = client.patch("/users/1", quiet=True, name="carol")
-        mock_httpx_patch.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     def test_options_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that options() calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that options() calls the underlying HTTP client via request() and returns response as a RestResponse"""
         client = RestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_options = mocker.patch.object(client.client, "options", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = client.options("/users", quiet=True)
-        mock_httpx_options.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
@@ -168,24 +168,28 @@ class TestAsyncRestClient:
         assert client.async_mode is True
 
     async def test_get_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that get() in async mode calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that get() in async mode calls the underlying HTTP client via request() and returns response as a
+        RestResponse
+        """
         client = AsyncRestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_get = mocker.patch.object(client.client, "get", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = await client.get("/users", quiet=True)
-        mock_httpx_get.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     async def test_post_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that post() in async mode calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that post() in async mode calls the underlying HTTP client via request() and returns response as a
+        RestResponse
+        """
         client = AsyncRestClient("http://example.com")
         mock_response = mock_response_factory(201)
-        mock_httpx_post = mocker.patch.object(client.client, "post", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = await client.post("/users", quiet=True, name="alice")
-        mock_httpx_post.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 201
 
@@ -205,37 +209,43 @@ class TestAsyncRestClient:
         assert r.status_code == 200
 
     async def test_put_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that put() in async mode calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that put() in async mode calls the underlying HTTP client via request() and returns response as a
+        RestResponse
+        """
         client = AsyncRestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_put = mocker.patch.object(client.client, "put", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = await client.put("/users/1", quiet=True, name="bob")
-        mock_httpx_put.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     async def test_patch_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
-        """Test that patch() in async mode calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that patch() in async mode calls the underlying HTTP client via request() and returns response as a
+        RestResponse
+        """
         client = AsyncRestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_patch = mocker.patch.object(client.client, "patch", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = await client.patch("/users/1", quiet=True, name="carol")
-        mock_httpx_patch.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
     async def test_options_call_async(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that options() in async mode calls the underlying HTTP client and returns response as a RestResponse"""
+        """Test that options() in async mode calls the underlying HTTP client via request() and returns response as a
+        RestResponse
+        """
         client = AsyncRestClient("http://example.com")
         mock_response = mock_response_factory()
-        mock_httpx_options = mocker.patch.object(client.client, "options", return_value=mock_response)
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
 
         r = await client.options("/users", quiet=True)
-        mock_httpx_options.assert_called_once()
+        mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 

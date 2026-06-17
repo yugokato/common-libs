@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Any
 
 from httpx import Timeout
@@ -35,6 +36,7 @@ class RestClientBase:
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
         self.async_mode = async_mode
+        self._hooks_cache: dict[bool, dict[str, list[Callable[..., Any]]]] = {}
         init_opts = dict(base_url=base_url, timeout=timeout, http2=True, **kwargs)
         if self.async_mode:
             self.client = AsyncHTTPClient(**init_opts)
@@ -50,17 +52,17 @@ class RestClientBase:
         self.client.base_url = url
 
     def get_bearer_token(self) -> str | None:
-        """Get bear token in the current session"""
+        """Get bearer token in the current session"""
         if isinstance(self.client.auth, BearerAuth):
             return self.client.auth.token
         elif (
             authorization_header := self.client.headers.get("Authorization")
-        ) and authorization_header.lower().startswith("bear "):
-            return authorization_header.split(" ")[1]
+        ) and authorization_header.lower().startswith("bearer "):
+            return authorization_header.split(maxsplit=1)[-1]
         return None
 
     def set_bearer_token(self, token: str) -> None:
-        """Set bear token to the current session"""
+        """Set bearer token to the current session"""
         self.client.auth = BearerAuth(token)
 
     def unset_bearer_token(self) -> None:

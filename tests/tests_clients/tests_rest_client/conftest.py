@@ -1,20 +1,10 @@
 """Shared pytest fixtures for REST client tests"""
 
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
 from pytest_mock import MockFixture
-
-from common_libs.clients.rest_client.hooks import get_hooks
-
-
-@pytest.fixture(autouse=True)
-def clear_hooks_cache() -> Generator[None, None, None]:
-    """Clear get_hooks lru_cache before and after each test to prevent stale hooks"""
-    get_hooks.cache_clear()
-    yield
-    get_hooks.cache_clear()
 
 
 @pytest.fixture

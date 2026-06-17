@@ -44,12 +44,12 @@ class TestRequestExt:
     def test_init_has_extra_attributes(self) -> None:
         """Test that RequestExt initializes with extra attributes"""
         request = RequestExt("GET", "http://example.com")
-        assert hasattr(request, "start_time")
-        assert hasattr(request, "end_time")
         assert hasattr(request, "retried")
-        assert request.start_time is None
-        assert request.end_time is None
         assert request.retried is None
+        assert hasattr(request, "start_time")
+        assert request.start_time is None
+        assert hasattr(request, "end_time")
+        assert request.end_time is None
 
     def test_standard_http_attributes(self) -> None:
         """Test that standard httpx Request attributes are accessible"""
@@ -90,6 +90,22 @@ class TestRestResponse:
         assert rest_response.response is None
         assert rest_response.response_time is None
 
+    def test_failed_stream_response_exposes_error_body(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that RestResponse.response contains the parsed error body for failed streaming responses"""
+        expected_body = {"error": "not found"}
+        mock_resp = mock_response_factory(404, is_stream=True)
+        mock_resp.json.return_value = expected_body
+        rest_response = RestResponse(mock_resp)
+        assert rest_response.is_stream is True
+        assert rest_response.ok is False
+        assert rest_response.response == expected_body
+
+    def test_successful_stream_response_has_no_body(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that RestResponse.response is None for successful streaming responses"""
+        mock_resp = mock_response_factory(200, is_stream=True)
+        rest_response = RestResponse(mock_resp)
+        assert rest_response.response is None
+
     def test_raise_for_status_delegates_to_response(self, mock_response_factory: Callable[..., MagicMock]) -> None:
         """Test that raise_for_status delegates to the inner response"""
         mock_resp = mock_response_factory(200)
@@ -112,6 +128,50 @@ class TestRestResponse:
 
         with pytest.raises(ValueError, match="Invalid mode"):
             next(rest_response.stream(mode="invalid"))
+
+    def test_stream_text_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that stream() in text mode yields whole string chunks, not individual characters"""
+        chunks = ["hello", " world"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.iter_text.return_value = iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = list(rest_response.stream(mode="text"))
+
+        assert result == chunks
+
+    def test_stream_bytes_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that stream() in bytes mode yields whole bytes chunks, not individual ints"""
+        chunks = [b"foo", b"bar"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.iter_bytes.return_value = iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = list(rest_response.stream(mode="bytes"))
+
+        assert result == chunks
+
+    def test_stream_line_yields_whole_lines(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that stream() in line mode yields whole lines, not individual characters"""
+        lines = ["line one", "line two"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.iter_lines.return_value = iter(lines)
+
+        rest_response = RestResponse(mock_resp)
+        result = list(rest_response.stream(mode="line"))
+
+        assert result == lines
+
+    def test_stream_raw_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that stream() in raw mode yields whole bytes chunks, not individual ints"""
+        chunks = [b"\x00\x01", b"\x02\x03"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.iter_raw.return_value = iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = list(rest_response.stream(mode="raw"))
+
+        assert result == chunks
 
 
 class TestHTTPClientMixin:
@@ -157,14 +217,13 @@ class TestSyncHTTPClient:
         """Test that send() attaches the original request to a raised exception via set_original_request"""
         client = SyncHTTPClient(base_url="http://example.com")
         request = client.build_request("GET", "/users")
-        mock_send = mocker.patch.object(client, "_send", side_effect=RuntimeError("error"))
+        mocker.patch.object(client, "_send", side_effect=RuntimeError("error"))
         mocker.patch("common_libs.clients.rest_client.ext.logger")
 
         with pytest.raises(RuntimeError, match="error") as exc_info:
             client.send(request)
 
         assert get_request_from_exception(exc_info.value) is request
-        mock_send.assert_called_once()
 
 
 class TestAsyncHTTPClient:

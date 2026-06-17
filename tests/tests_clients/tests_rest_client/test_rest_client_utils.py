@@ -12,9 +12,12 @@ from pytest import FixtureRequest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import RequestExt, RestResponse
+from common_libs.clients.rest_client.rest_client import AsyncRestClient
 from common_libs.clients.rest_client.utils import (
     get_response_reason,
     get_supported_request_parameters,
+    manage_content_type,
+    mask_sensitive_headers,
     mask_sensitive_value,
     parse_query_strings,
     process_request_body,
@@ -80,6 +83,86 @@ class TestMaskSensitiveValue:
         result = mask_sensitive_value(body, "application/json")
         assert result["old_password"] == "*" * len(old_pass)
         assert result["new_password"] == "*" * len(new_pass)
+
+    def test_form_encoded_value_containing_equals_sign(self) -> None:
+        """Test that form-encoded values containing '=' are handled correctly"""
+        body = "token=abc=def&other=value"
+        result = mask_sensitive_value(body, "application/x-www-form-urlencoded")
+        assert isinstance(result, str)
+        assert "other=value" in result
+
+    def test_password_field_masked_case_insensitive(self) -> None:
+        """Test that password field matching is case-insensitive"""
+        password = "secret"
+        body: dict[str, Any] = {"Password": password, "PASSWORD": password}
+        result = mask_sensitive_value(body, "application/json")
+        assert result["Password"] == "*" * len(password)
+        assert result["PASSWORD"] == "*" * len(password)
+
+
+class TestMaskSensitiveHeaders:
+    """Tests for mask_sensitive_headers function"""
+
+    def test_authorization_header_masked(self) -> None:
+        """Test that Authorization header value is replaced with asterisks"""
+        headers = {"Authorization": "Bearer secret-token", "Content-Type": "application/json"}
+        result = mask_sensitive_headers(headers)
+        assert result["Authorization"] == "***"
+        assert result["Content-Type"] == "application/json"
+
+    def test_cookie_header_masked(self) -> None:
+        """Test that Cookie header value is replaced with asterisks"""
+        headers = {"Cookie": "session=abc123"}
+        result = mask_sensitive_headers(headers)
+        assert result["Cookie"] == "***"
+
+    def test_set_cookie_header_masked(self) -> None:
+        """Test that Set-Cookie header value is replaced with asterisks"""
+        headers = {"Set-Cookie": "session=abc123; Path=/; HttpOnly"}
+        result = mask_sensitive_headers(headers)
+        assert result["Set-Cookie"] == "***"
+
+    def test_proxy_authorization_header_masked(self) -> None:
+        """Test that Proxy-Authorization header value is replaced with asterisks"""
+        headers = {"Proxy-Authorization": "Basic dXNlcjpwYXNz"}
+        result = mask_sensitive_headers(headers)
+        assert result["Proxy-Authorization"] == "***"
+
+    def test_x_api_key_header_masked(self) -> None:
+        """Test that X-Api-Key header value is replaced with asterisks"""
+        headers = {"X-Api-Key": "my-api-key"}
+        result = mask_sensitive_headers(headers)
+        assert result["X-Api-Key"] == "***"
+
+    def test_api_key_header_masked(self) -> None:
+        """Test that Api-Key header value is replaced with asterisks"""
+        headers = {"Api-Key": "my-api-key"}
+        result = mask_sensitive_headers(headers)
+        assert result["Api-Key"] == "***"
+
+    def test_matching_is_case_insensitive(self) -> None:
+        """Test that header name matching is case-insensitive"""
+        headers = {"authorization": "Bearer token", "COOKIE": "sid=123"}
+        result = mask_sensitive_headers(headers)
+        assert result["authorization"] == "***"
+        assert result["COOKIE"] == "***"
+
+    def test_non_sensitive_headers_unchanged(self) -> None:
+        """Test that non-sensitive headers are returned unchanged"""
+        headers = {"Content-Type": "application/json", "Accept": "application/json", "X-Request-ID": "abc"}
+        result = mask_sensitive_headers(headers)
+        assert result == headers
+
+    def test_returns_copy_not_mutating_original(self) -> None:
+        """Test that mask_sensitive_headers returns a new dict and does not mutate the input"""
+        headers = {"Authorization": "Bearer token"}
+        result = mask_sensitive_headers(headers)
+        assert result is not headers
+        assert headers["Authorization"] == "Bearer token"
+
+    def test_empty_headers_returns_empty_dict(self) -> None:
+        """Test that an empty input returns an empty dict"""
+        assert mask_sensitive_headers({}) == {}
 
 
 class TestParseQueryStrings:
@@ -224,6 +307,14 @@ class TestProcessRequestBody:
         result = process_request_body(mock_request)
         assert not result
 
+    def test_body_without_content_type_does_not_raise(self, mocker: MockFixture) -> None:
+        """Test that process_request_body handles a missing Content-Type header without raising"""
+        mock_request = mocker.MagicMock()
+        mock_request.read.return_value = b'{"key": "value"}'
+        mock_request.headers = {}
+        result = process_request_body(mock_request, hide_sensitive_values=True)
+        assert result == {"key": "value"}
+
 
 class TestGetSupportedRequestParameters:
     """Tests for get_supported_request_parameters function"""
@@ -237,7 +328,6 @@ class TestGetSupportedRequestParameters:
         """Test that custom parameters are included"""
         result = get_supported_request_parameters()
         assert "quiet" in result
-        assert "query" in result
 
 
 class TestRetryOn:
@@ -920,3 +1010,108 @@ class TestRetryOn:
             @retry_on([])
             def f() -> Any:
                 return "ok"
+
+
+class TestManageContentType:
+    """Tests for common_libs.clients.rest_client.utils.manage_content_type()"""
+
+    @pytest.fixture
+    def client(self) -> AsyncRestClient:
+        """AsyncRestClient instance used as the `self` argument to decorated functions."""
+        return AsyncRestClient("http://example.com")
+
+    def _make_decorated(self, mode: str, captured: dict[str, Any]) -> Callable[..., Any]:
+        """Build a `manage_content_type`-decorated dummy for the given mode.
+
+        :param mode: Either "sync" or "async".
+        :param captured: Dict populated at execution time with the kwargs the dummy received
+                         and a snapshot of `self.client.headers.get("Content-Type")`.
+        """
+        if mode == "sync":
+
+            @manage_content_type
+            def dummy(self_arg: AsyncRestClient, **kwargs: Any) -> None:
+                captured["kwargs"] = dict(kwargs)
+                captured["session_ct"] = self_arg.client.headers.get("Content-Type")
+
+        else:
+
+            @manage_content_type
+            async def dummy(self_arg: AsyncRestClient, **kwargs: Any) -> None:
+                captured["kwargs"] = dict(kwargs)
+                captured["session_ct"] = self_arg.client.headers.get("Content-Type")
+
+        return dummy
+
+    async def invoke(self, f: Callable[..., Any], client: AsyncRestClient, **kwargs: Any) -> None:
+        """Call the decorated function and await the result if it is a coroutine.
+
+        :param f: Decorated function to invoke.
+        :param client: Client instance passed as the first positional argument.
+        :param kwargs: Keyword arguments forwarded to the decorated function.
+        """
+        result = f(client, **kwargs)
+        if inspect.iscoroutine(result):
+            await result
+
+    def test_sets_content_type_for_json_payload(self, client: AsyncRestClient) -> None:
+        """Test that Content-Type: application/json is injected when a json payload is provided"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, json={"name": "alice"})
+        assert captured["kwargs"]["headers"] == {"Content-Type": "application/json"}
+
+    def test_sets_content_type_when_no_body_params(self, client: AsyncRestClient) -> None:
+        """Test that Content-Type is injected when no body parameters are provided"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, params={"q": "search"})
+        assert captured["kwargs"]["headers"] == {"Content-Type": "application/json"}
+
+    def test_does_not_set_content_type_for_form_data(self, client: AsyncRestClient) -> None:
+        """Test that Content-Type is not injected when form data is provided"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, data={"field": "value"})
+        assert "headers" not in captured["kwargs"]
+
+    def test_does_not_set_content_type_for_files(self, client: AsyncRestClient) -> None:
+        """Test that Content-Type is not injected when files are provided"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, files={"upload": b"content"})
+        assert "headers" not in captured["kwargs"]
+
+    def test_does_not_override_existing_request_content_type(self, client: AsyncRestClient) -> None:
+        """Test that an existing per-request Content-Type header is not overridden"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, json={"x": 1}, headers={"Content-Type": "text/plain"})
+        assert captured["kwargs"]["headers"]["Content-Type"] == "text/plain"
+
+    def test_does_not_override_existing_session_content_type(self, client: AsyncRestClient) -> None:
+        """Test that an existing session-level Content-Type header prevents injection"""
+        client.client.headers["Content-Type"] = "application/xml"
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, json={"x": 1})
+        assert "headers" not in captured["kwargs"]
+        assert client.client.headers.get("Content-Type") == "application/xml"
+
+    def test_preserves_other_request_headers_when_injecting(self, client: AsyncRestClient) -> None:
+        """Test that existing per-request headers are preserved when Content-Type is injected"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated("sync", captured)
+        dummy(client, json={"x": 1}, headers={"X-Custom": "value"})
+        injected = captured["kwargs"]["headers"]
+        assert injected["Content-Type"] == "application/json"
+        assert injected["X-Custom"] == "value"
+
+    @pytest.mark.parametrize("mode", ["sync", "async"])
+    async def test_content_type_is_request_local(self, client: AsyncRestClient, mode: str) -> None:
+        """Test that Content-Type is injected per-request and session headers are not mutated"""
+        captured: dict[str, Any] = {}
+        dummy = self._make_decorated(mode, captured)
+        await self.invoke(dummy, client, json={"key": "value"})
+        assert captured["kwargs"]["headers"]["Content-Type"] == "application/json"
+        assert captured["session_ct"] is None

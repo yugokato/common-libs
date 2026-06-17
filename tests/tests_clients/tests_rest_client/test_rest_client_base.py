@@ -69,3 +69,11 @@ class TestRestClientBase:
         client.set_bearer_token("some-token")
         client.unset_bearer_token()
         assert client.client.auth is None
+
+    def test_get_bearer_token_from_header_with_extra_whitespace(self) -> None:
+        """Test that get_bearer_token correctly extracts the token when the Authorization header has extra whitespace"""
+        token = "my-token-123"
+        client = RestClientBase("http://example.com")
+        client.client.headers["Authorization"] = f"Bearer  {token}"  # two spaces
+        result = client.get_bearer_token()
+        assert result == token

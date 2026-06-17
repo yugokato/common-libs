@@ -5,7 +5,6 @@ import json
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
 from httpx import Request, Response
@@ -13,7 +12,13 @@ from httpx import Request, Response
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
-from .utils import get_response_reason, parse_query_strings, process_request_body, process_response
+from .utils import (
+    get_response_reason,
+    mask_sensitive_headers,
+    parse_query_strings,
+    process_request_body,
+    process_response,
+)
 
 if TYPE_CHECKING:
     from .ext import RequestExt, ResponseExt
@@ -24,14 +29,15 @@ logger = get_logger(__name__)
 _hook_executor = ThreadPoolExecutor(max_workers=32)
 
 
-@lru_cache
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
-    """Get request/response hooks"""
-    async_mode = rest_client.async_mode
-    return {
-        "request": [_hook_factory(request_hooks, async_mode, quiet)],
-        "response": [_hook_factory(response_hooks, async_mode, quiet, rest_client)],
-    }
+    """Get request/response hooks, cached per client instance and `quiet` flag"""
+    if quiet not in rest_client._hooks_cache:
+        async_mode = rest_client.async_mode
+        rest_client._hooks_cache[quiet] = {
+            "request": [_hook_factory(request_hooks, async_mode, quiet)],
+            "response": [_hook_factory(response_hooks, async_mode, quiet, rest_client)],
+        }
+    return rest_client._hooks_cache[quiet]
 
 
 def request_hooks(request: RequestExt, quiet: bool) -> None:
@@ -58,7 +64,7 @@ def _log_request(request: RequestExt, quiet: bool) -> None:
             "method": request.method,
             "path": request.url,
             "payload": process_request_body(request),
-            "request_headers": dict(request.headers),
+            "request_headers": mask_sensitive_headers(dict(request.headers)),
         }
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
@@ -72,8 +78,8 @@ def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType) -
         "method": request.method,
         "path": request.url,
         "status_code": response.status_code,
-        "response_headers": dict(response.headers),
-        "response_time": None if response.stream else response.elapsed.total_seconds(),
+        "response_headers": mask_sensitive_headers(dict(response.headers)),
+        "response_time": None if response.is_stream else response.elapsed.total_seconds(),
     }
     if response.is_stream and response.is_success:
         log_data.update(response="N/A (streaming)")
@@ -117,23 +123,29 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
         summary += color(f"{bullet} request_id: {request.request_id}\n", color_code=ColorCodes.CYAN)
 
         # method and url
-        summary += color(f"{bullet} request: {request.method} {response.url}\n", color_code=ColorCodes.CYAN)
+        summary += color(f"{bullet} request: {request.method} {request.url}\n", color_code=ColorCodes.CYAN)
 
         # request headers
         if log_headers:
-            summary += color(f"{bullet} request_headers: {dict(request.headers)}\n", color_code=ColorCodes.CYAN)
+            summary += color(
+                f"{bullet} request_headers: {mask_sensitive_headers(dict(request.headers))}\n",
+                color_code=ColorCodes.CYAN,
+            )
 
         # request payload and query parameters
         if query_strings := parse_query_strings(str(request.url)):
             summary += color(f"{bullet} query params: {query_strings}\n", color_code=ColorCodes.CYAN)
         request_body = process_request_body(request, truncate_bytes=True)
         if request_body:
-            payload: str | bytes
+            payload: str
             try:
                 payload = json.dumps(request_body)
             except TypeError:
-                payload = request_body
-            summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)  # type: ignore
+                if isinstance(request_body, bytes):
+                    payload = request_body.decode("utf-8", errors="replace")
+                else:
+                    payload = str(request_body)
+            summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)
 
         # status_code and reason
         status_color_code = ColorCodes.GREEN if response.is_success else ColorCodes.RED
@@ -158,7 +170,10 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
 
         # response headers
         if log_headers:
-            summary += color(f"{bullet} response_headers: {dict(response.headers)}\n", color_code=ColorCodes.CYAN)
+            summary += color(
+                f"{bullet} response_headers: {mask_sensitive_headers(dict(response.headers))}\n",
+                color_code=ColorCodes.CYAN,
+            )
 
         # response time
         if not response.is_stream:

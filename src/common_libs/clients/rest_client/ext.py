@@ -47,7 +47,6 @@ class RequestExt(Request):
         self.retried: RequestExt | None = None
 
 
-@dataclass
 class ResponseExt(Response):
     """Extended Response class"""
 
@@ -65,7 +64,7 @@ class RestResponse:
     request_id: str = field(init=False)
     status_code: int = field(init=False)
     response: Any = field(init=False)
-    response_time: float = field(init=False)
+    response_time: float | None = field(init=False)
     request: RequestExt = field(init=False)
     ok: bool = field(init=False)
     is_stream: bool = field(init=False)
@@ -75,7 +74,7 @@ class RestResponse:
         object.__setattr__(self, "request_id", self._response.request.request_id)
         object.__setattr__(self, "status_code", self._response.status_code)
         object.__setattr__(self, "response_time", None if is_stream else self._response.elapsed.total_seconds())
-        if is_stream:
+        if is_stream and self._response.is_success:
             object.__setattr__(self, "response", None)
         else:
             object.__setattr__(self, "response", self._process_response(self._response))
@@ -105,8 +104,7 @@ class RestResponse:
             iter_func = partial(self._response.iter_raw, chunk_size=chunk_size)
         else:
             raise ValueError(f"Invalid mode: {mode}")
-        for d in iter_func():
-            yield from d
+        yield from iter_func()
 
     async def astream(
         self, mode: Literal["text", "bytes", "line", "raw"] = "text", chunk_size: int | None = None

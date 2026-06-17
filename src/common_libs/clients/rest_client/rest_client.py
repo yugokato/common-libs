@@ -40,7 +40,6 @@ class RestClient(RestClientBase):
     def __init__(
         self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
     ) -> None:
-        super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -49,6 +48,7 @@ class RestClient(RestClientBase):
             raise RuntimeError(
                 f"{RestClient.__name__} cannot be used inside async context. Use {AsyncRestClient.__name__} instead."
             )
+        super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
 
     def __enter__(self) -> Self:
         return self
@@ -67,7 +67,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param query_params: Query parameters
         """
-        return self._get(path, params=query_params, quiet=quiet)
+        return self._request("GET", path, params=query_params, quiet=quiet)
 
     def post(
         self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
@@ -79,7 +79,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return self._post(path, json=payload, files=files, quiet=quiet)
+        return self._request("POST", path, json=payload, files=files, quiet=quiet)
 
     def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a DELETE API request
@@ -88,7 +88,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return self._delete(path, json=payload, quiet=quiet)
+        return self._request("DELETE", path, json=payload, quiet=quiet)
 
     def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PUT API request
@@ -97,7 +97,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return self._put(path, json=payload, quiet=quiet)
+        return self._request("PUT", path, json=payload, quiet=quiet)
 
     def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PATCH API request
@@ -106,7 +106,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return self._patch(path, json=payload, quiet=quiet)
+        return self._request("PATCH", path, json=payload, quiet=quiet)
 
     def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make an OPTIONS API request
@@ -115,7 +115,7 @@ class RestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param query_params: Query parameters
         """
-        return self._options(path, params=query_params, quiet=quiet)
+        return self._request("OPTIONS", path, params=query_params, quiet=quiet)
 
     @contextmanager
     @inject_hooks
@@ -133,75 +133,15 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of get()
+    def _request(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+        """Low-level function for all HTTP verb methods
 
+        :param method: HTTP method
         :param path: Endpoint path
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = self.client.get(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of post()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = self.client.post(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of delete()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        # Use client.request() as client.delete() doesn't support json parameter
-        r = self.client.request("DELETE", path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of put()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = self.client.put(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of patch()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = self.client.patch(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of options()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = self.client.options(path, **raw_options)
+        r = self.client.request(method.upper(), path, **raw_options)
         return RestResponse(cast(ResponseExt, r))
 
 
@@ -266,7 +206,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param query_params: Query parameters
         """
-        return await self._get(path, params=query_params, quiet=quiet)
+        return await self._request("GET", path, params=query_params, quiet=quiet)
 
     async def post(
         self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
@@ -278,7 +218,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return await self._post(path, json=payload, files=files, quiet=quiet)
+        return await self._request("POST", path, json=payload, files=files, quiet=quiet)
 
     async def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a DELETE API request
@@ -287,7 +227,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return await self._delete(path, json=payload, quiet=quiet)
+        return await self._request("DELETE", path, json=payload, quiet=quiet)
 
     async def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PUT API request
@@ -296,7 +236,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return await self._put(path, json=payload, quiet=quiet)
+        return await self._request("PUT", path, json=payload, quiet=quiet)
 
     async def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a PATCH API request
@@ -305,7 +245,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param payload: JSON payload
         """
-        return await self._patch(path, json=payload, quiet=quiet)
+        return await self._request("PATCH", path, json=payload, quiet=quiet)
 
     async def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
         """Make an OPTIONS API request
@@ -314,7 +254,7 @@ class AsyncRestClient(RestClientBase):
         :param quiet: A flag to suppress API request/response log
         :param query_params: Query parameters
         """
-        return await self._options(path, params=query_params, quiet=quiet)
+        return await self._request("OPTIONS", path, params=query_params, quiet=quiet)
 
     @asynccontextmanager
     @inject_hooks
@@ -334,73 +274,13 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _get(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of get()
+    async def _request(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+        """Low-level function for all HTTP verb methods
 
+        :param method: HTTP method
         :param path: Endpoint path
         :param quiet: A flag to suppress API request/response log
         :param raw_options: Any other parameters passed directly to the httpx library
         """
-        r = await self.client.get(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    async def _post(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of post()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = await self.client.post(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    async def _delete(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of delete()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        # Use client.request() as client.delete() doesn't support json parameter
-        r = await self.client.request("DELETE", path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    async def _put(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of put()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = await self.client.put(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    async def _patch(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of patch()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = await self.client.patch(path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
-
-    @inject_hooks
-    @manage_content_type
-    async def _options(self, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
-        """Low-level function of options()
-
-        :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
-        :param raw_options: Any other parameters passed directly to the httpx library
-        """
-        r = await self.client.options(path, **raw_options)
+        r = await self.client.request(method.upper(), path, **raw_options)
         return RestResponse(cast(ResponseExt, r))

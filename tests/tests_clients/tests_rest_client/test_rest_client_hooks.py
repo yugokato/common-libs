@@ -1,6 +1,7 @@
 """Tests for common_libs.clients.rest_client.hooks module"""
 
 from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
 from pytest_mock import MockFixture
@@ -99,3 +100,51 @@ class TestResponseHooks:
 
         response_hooks(mock_response, quiet=True, rest_client=mock_client)
         mock_hooks_logger.error.assert_called()
+
+
+class TestHeaderMasking:
+    """Tests that sensitive headers are masked in structured log records"""
+
+    def _make_request(self, mocker: MockFixture, headers: dict[str, Any]) -> MagicMock:
+        mock_request: MagicMock = mocker.MagicMock(spec=RequestExt)
+        mock_request.request_id = "req-mask-test"
+        mock_request.method = "GET"
+        mock_request.url = "http://example.com/api"
+        mock_request.headers = headers
+        mock_request.extensions = {}
+        mock_request.read.return_value = b""
+        return mock_request
+
+    def test_request_log_extra_masks_authorization_header(
+        self, mock_hooks_logger: MagicMock, mocker: MockFixture
+    ) -> None:
+        """Test that Authorization header is masked in the structured log extra for request hooks"""
+        mock_request = self._make_request(
+            mocker, {"Authorization": "Bearer secret", "Content-Type": "application/json"}
+        )
+
+        request_hooks(mock_request, quiet=False)
+
+        logged_extra = mock_hooks_logger.info.call_args[1]["extra"]
+        assert logged_extra["request_headers"]["Authorization"] == "***"
+        assert logged_extra["request_headers"]["Content-Type"] == "application/json"
+
+    def test_response_log_extra_masks_set_cookie_header(
+        self,
+        mock_hooks_logger: MagicMock,
+        mock_response_factory: Callable[..., MagicMock],
+        mocker: MockFixture,
+    ) -> None:
+        """Test that Set-Cookie header is masked in the structured log extra for response hooks"""
+        mocker.patch("common_libs.clients.rest_client.hooks._print_api_summary")
+
+        mock_response = mock_response_factory(200)
+        mock_response.headers = {"Set-Cookie": "session=abc; HttpOnly", "Content-Type": "application/json"}
+        mock_client = mocker.MagicMock()
+        mock_client.prettify_response_log = False
+
+        response_hooks(mock_response, quiet=False, rest_client=mock_client)
+
+        logged_extra = mock_hooks_logger.info.call_args[1]["extra"]
+        assert logged_extra["response_headers"]["Set-Cookie"] == "***"
+        assert logged_extra["response_headers"]["Content-Type"] == "application/json"

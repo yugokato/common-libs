@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 from urllib.parse import parse_qs, urlparse
 
 from httpx import Client
@@ -29,6 +29,10 @@ logger = get_logger(__name__)
 TRUNCATE_LEN = 512
 ORIGINAL_REQUEST_ATTR = "_original_request"
 SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
+_SENSITIVE_FIELD_NAMES = frozenset({"password"})
+_SENSITIVE_HEADER_NAMES = frozenset(
+    {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key"}
+)
 
 
 def process_request_body(
@@ -51,32 +55,40 @@ def process_request_body(
                 if not isinstance(body, str):
                     return body
             if hide_sensitive_values:
-                body = mask_sensitive_value(body, request.headers["Content-Type"])
+                body = mask_sensitive_value(body, request.headers.get("Content-Type", ""))
     return body
 
 
 def mask_sensitive_value(body: Any, content_type: str) -> Any:
     """Mask a field value when a field name of the request body contains specific word"""
     if isinstance(body, dict):
-        part_field_names_to_mask_value = [
-            "password"
-            # TODO: Add more if needed
-        ]
         for k, v in body.items():
             if isinstance(v, dict):
                 mask_sensitive_value(v, content_type)
             elif isinstance(v, list):
                 for nested_obj in v:
                     mask_sensitive_value(nested_obj, content_type)
-            elif isinstance(v, str) and any(part in k for part in part_field_names_to_mask_value):
+            elif isinstance(v, str) and any(part in k.lower() for part in _SENSITIVE_FIELD_NAMES):
                 body[k] = "*" * len(v)
     elif isinstance(body, str) and content_type == "application/x-www-form-urlencoded" and "=" in body:
         # Convert application/x-www-form-urlencoded data to a dictionary and mask sensitive values
-        parsed_body = {k: v for k, v in [p.split("=") for p in body.split("&") if p]}
+        parsed_body = {k: v for p in body.split("&") if p and "=" in p for k, v in [p.split("=", 1)]}
         masked_body = mask_sensitive_value(parsed_body, content_type)
         return "&".join(f"{k}={v}" for k, v in masked_body.items())
 
     return body
+
+
+def mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return a copy of `headers` with sensitive values replaced by asterisks.
+
+    Header names are matched case-insensitively against a built-in blocklist
+    (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`).
+    All other headers are passed through unchanged.
+
+    :param headers: A mapping of header name to header value.
+    """
+    return {k: ("***" if k.lower() in _SENSITIVE_HEADER_NAMES else v) for k, v in headers.items()}
 
 
 def process_response(response: ResponseExt | RestResponse, prettify: bool = False) -> JSONType:
@@ -85,6 +97,7 @@ def process_response(response: ResponseExt | RestResponse, prettify: bool = Fals
 
     if isinstance(response, RestResponse):
         response = response._response
+
     try:
         if response.is_stream:
             if response.is_success:
@@ -127,18 +140,14 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
     @wraps(f)
     def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> T:
         session_headers = self.client.headers
-        request_headers = cast(dict[str, Any], kwargs.get("headers", {}))
-        headers = {**session_headers, **request_headers}
-        has_content_type_header = "Content-Type" in [h.title() for h in list(headers.keys())]
-        content_type_set = False
+        raw_headers: Any = kwargs.get("headers")
+        request_headers: dict[str, Any] = dict(raw_headers or {})
+        merged = {**session_headers, **request_headers}
+        has_content_type_header = "Content-Type" in [h.title() for h in merged]
         if not has_content_type_header and (kwargs.get("json") or not any([kwargs.get("data"), kwargs.get("files")])):
-            self.client.headers.update({"Content-Type": "application/json"})
-            content_type_set = True
-        try:
-            return f(self, *args, **kwargs)
-        finally:
-            if content_type_set:
-                self.client.headers.pop("Content-Type", None)
+            request_headers["Content-Type"] = "application/json"
+            kwargs["headers"] = request_headers
+        return f(self, *args, **kwargs)
 
     return wrapper
 
@@ -285,7 +294,7 @@ def retry_on(
 @lru_cache
 def get_supported_request_parameters() -> list[str]:
     """Return a list of supported request parameters"""
-    custom_parameters = ["quiet", "query"]
+    custom_parameters = ["quiet"]
     requests_lib_params = inspect.signature(Client.request).parameters
     return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
 
