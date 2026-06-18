@@ -1,9 +1,11 @@
 """Tests for common_libs.clients.rest_client.ext module"""
 
+import errno
 from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from httpx import TransportError
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import (
@@ -13,7 +15,7 @@ from common_libs.clients.rest_client.ext import (
     RestResponse,
     SyncHTTPClient,
 )
-from common_libs.clients.rest_client.utils import get_request_from_exception
+from common_libs.clients.rest_client.utils import RetryPolicy, get_request_from_exception
 
 
 class TestBearerAuth:
@@ -50,6 +52,13 @@ class TestRequestExt:
         assert request.start_time is None
         assert hasattr(request, "end_time")
         assert request.end_time is None
+
+    def test_init_auto_generates_request_id(self) -> None:
+        """Test that RequestExt generates a request_id immediately on construction"""
+        request = RequestExt("GET", "http://example.com")
+        assert hasattr(request, "request_id")
+        assert isinstance(request.request_id, str)
+        assert len(request.request_id) == 36  # UUID4 canonical form
 
     def test_standard_http_attributes(self) -> None:
         """Test that standard httpx Request attributes are accessible"""
@@ -208,6 +217,7 @@ class TestHTTPClientMixin:
         assert log_data["request_id"] == request_id
         assert "GET" in log_data["request"]
         assert log_data["method"] == "GET"
+        assert isinstance(log_data["path"], str)
 
 
 class TestSyncHTTPClient:
@@ -225,6 +235,43 @@ class TestSyncHTTPClient:
 
         assert get_request_from_exception(exc_info.value) is request
 
+    def test_retry_none_disables_503_retry(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that retry=None disables the default 503 retry so the response is returned immediately"""
+        client = SyncHTTPClient(base_url="http://example.com", retry=None)
+        mock_503 = mock_response_factory(503)
+        send_mock = mocker.patch.object(client, "_send", return_value=mock_503)
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        result = client.send(client.build_request("GET", "/"))
+
+        assert result is mock_503
+        assert send_mock.call_count == 1
+
+    def test_custom_retry_policy_retries_on_configured_status(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that a custom RetryPolicy with a different status code retries on that code"""
+        mocker.patch("time.sleep")
+        client = SyncHTTPClient(base_url="http://example.com", retry=RetryPolicy(condition=429, retry_after=0))
+        mock_429 = mock_response_factory(429)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        def _send_side_effect(request: MagicMock, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return mock_429 if call_count == 1 else mock_ok
+
+        mocker.patch.object(client, "_send", side_effect=_send_side_effect)
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        result = client.send(client.build_request("GET", "/"))
+
+        assert result is mock_ok
+        assert call_count == 2
+
 
 class TestAsyncHTTPClient:
     """Tests for AsyncHTTPClient.send()"""
@@ -240,3 +287,108 @@ class TestAsyncHTTPClient:
                 await client.send(request)
 
         assert get_request_from_exception(exc_info.value) is request
+
+    async def test_retry_none_disables_503_retry(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that retry=None disables the default 503 retry so the response is returned immediately"""
+        async with AsyncHTTPClient(base_url="http://example.com", retry=None) as client:
+            mock_503 = mock_response_factory(503)
+            send_mock = mocker.patch.object(client, "_send", new_callable=AsyncMock, return_value=mock_503)
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            result = await client.send(client.build_request("GET", "/"))
+
+        assert result is mock_503
+        assert send_mock.call_count == 1
+
+
+class TestConnectionResetReconnect:
+    """Tests for connection-reset reconnect behavior in both sync and async clients"""
+
+    def _make_reset_error(self) -> TransportError:
+        cause = OSError(errno.ECONNRESET, "socket error")
+        err = TransportError("transport failed")
+        err.__cause__ = cause
+        return err
+
+    def test_sync_safe_method_reconnects_on_reset(self, mocker: MockFixture) -> None:
+        """Test that a safe-method (GET) request is automatically retried after a connection reset"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("GET", "/data")
+        mock_response = mocker.MagicMock()
+        send_mock = mocker.patch.object(client, "_send", side_effect=[self._make_reset_error(), mock_response])
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        result = client.send(request)
+
+        assert result is mock_response
+        assert send_mock.call_count == 2
+
+    def test_sync_non_safe_method_raises_on_reset(self, mocker: MockFixture) -> None:
+        """Test that a non-safe method (POST) is NOT retried on connection reset to avoid double-submit"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("POST", "/submit")
+        send_mock = mocker.patch.object(client, "_send", side_effect=self._make_reset_error())
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        with pytest.raises(TransportError):
+            client.send(request)
+
+        assert send_mock.call_count == 1
+
+    def test_sync_safe_method_does_not_reconnect_on_non_reset(self, mocker: MockFixture) -> None:
+        """Test that a non-reset TransportError on a safe method propagates without reconnecting"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("GET", "/data")
+        send_mock = mocker.patch.object(client, "_send", side_effect=TransportError("boom"))
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        with pytest.raises(TransportError):
+            client.send(request)
+
+        assert send_mock.call_count == 1
+
+    async def test_async_safe_method_reconnects_on_reset(self, mocker: MockFixture) -> None:
+        """Test that an async safe-method (GET) request is automatically retried after a connection reset"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = client.build_request("GET", "/data")
+            mock_response = mocker.MagicMock()
+            send_mock = mocker.patch.object(
+                client,
+                "_send",
+                new_callable=AsyncMock,
+                side_effect=[self._make_reset_error(), mock_response],
+            )
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            result = await client.send(request)
+
+        assert result is mock_response
+        assert send_mock.call_count == 2
+
+    async def test_async_non_safe_method_raises_on_reset(self, mocker: MockFixture) -> None:
+        """Test that an async non-safe method (POST) is NOT retried on connection reset"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = client.build_request("POST", "/submit")
+            send_mock = mocker.patch.object(
+                client, "_send", new_callable=AsyncMock, side_effect=self._make_reset_error()
+            )
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            with pytest.raises(TransportError):
+                await client.send(request)
+
+        assert send_mock.call_count == 1
+
+    async def test_async_safe_method_does_not_reconnect_on_non_reset(self, mocker: MockFixture) -> None:
+        """Test that a non-reset TransportError on an async safe method propagates without reconnecting"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = client.build_request("GET", "/data")
+            send_mock = mocker.patch.object(client, "_send", new_callable=AsyncMock, side_effect=TransportError("boom"))
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            with pytest.raises(TransportError):
+                await client.send(request)
+
+        assert send_mock.call_count == 1

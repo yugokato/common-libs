@@ -15,7 +15,15 @@ from httpx._auth import Auth
 
 from common_libs.logging import get_logger
 
-from .utils import process_response, retry_on, set_request_to_exception
+from .utils import (
+    DEFAULT_RETRY_POLICY,
+    SAFE_HTTP_METHODS,
+    RetryPolicy,
+    is_connection_reset,
+    process_response,
+    retry_on,
+    set_request_to_exception,
+)
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
 
@@ -41,7 +49,7 @@ class RequestExt(Request):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.request_id: str
+        self.request_id: str = str(uuid.uuid4())
         self.start_time: datetime | None = None
         self.end_time: datetime | None = None
         self.retried: RequestExt | None = None
@@ -138,6 +146,25 @@ class HTTPClientMixin:
 
     _request_id_header = "X-Request-ID"
 
+    def __init__(self, *args: Any, retry: RetryPolicy | None = DEFAULT_RETRY_POLICY, **kwargs: Any) -> None:
+        """Initialize the mixin and build the retry decorator from the given policy.
+
+        :param retry: Retry policy controlling automatic retry behavior, or `None` to disable retries.
+        :param args: Positional arguments forwarded to the underlying httpx client.
+        :param kwargs: Keyword arguments forwarded to the underlying httpx client.
+        """
+        self._retry_decorator: Any = (
+            retry_on(
+                retry.condition,
+                num_retries=retry.num_retries,
+                retry_after=retry.retry_after,
+                safe_methods_only=retry.safe_methods_only,
+            )
+            if retry is not None
+            else None
+        )
+        super().__init__(*args, **kwargs)
+
     def build_request(self, *args: Any, **kwargs: Any) -> RequestExt:
         request = super().build_request(*args, **kwargs)  # type: ignore[misc]
         return self._modify_request(request)
@@ -208,20 +235,27 @@ class HTTPClientMixin:
         }
 
     def _handle_error(self, e: Exception, request: RequestExt, log_data: dict[str, str]) -> None:
+        log_data["traceback"] = traceback.format_exc()
         if isinstance(e, TimeoutException):
-            log_data["traceback"] = traceback.format_exc()
             logger.error(
                 f"Request timed out: {request.method.upper()} {request.url}\n (request_id: {request.request_id})",
                 extra=log_data,
             )
         else:
-            log_data["traceback"] = traceback.format_exc()
             logger.error(
                 f"An unexpected error occurred while processing the API request (request_id: {request.request_id})\n"
                 f"request: {request.method.upper()} {request.url}\n"
                 f"error: {type(e).__name__}: {e}",
                 extra=log_data,
             )
+
+    def _should_reconnect(self, exc: TransportError, request: RequestExt) -> bool:
+        """Return True if the request should be transparently reconnected after a connection reset.
+
+        :param exc: The transport error that was raised.
+        :param request: The request that triggered the error.
+        """
+        return is_connection_reset(exc) and request.method.upper() in SAFE_HTTP_METHODS
 
 
 class SyncHTTPClient(HTTPClientMixin, SyncClient):
@@ -232,57 +266,75 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
 
         - Set X-Request-ID header
         - Dispatch request hooks
-        - Reconnect in case a connection is reset by peer
+        - Reconnect in case a connection is reset by peer (safe methods only)
+        - Retry on the configured policy (default: 503)
         - Log exceptions
         """
         log_data = self._build_log_data(request)
+        send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
-                return cast(ResponseExt, self._send(request, **kwargs))
+                return cast(ResponseExt, send_fn(request, **kwargs))
             except TransportError as e:
-                if "Connection reset by peer" in str(e):
+                if self._should_reconnect(e, request):
                     logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
-                    return cast(ResponseExt, self._send(request, **kwargs))
+                    return cast(ResponseExt, send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
-            set_request_to_exception(e, request)  # let retry_on chain request.retried on exception retries
+            set_request_to_exception(e, request)
             self._handle_error(e, request, log_data)
             raise
 
-    @retry_on(503, retry_after=15, safe_methods_only=True)
     def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
         self.call_request_hooks(request)
-        with self.set_timestamp(request):
-            resp = cast(ResponseExt, super().send(request, **kwargs))
+        try:
+            with self.set_timestamp(request):
+                resp = cast(ResponseExt, super().send(request, **kwargs))
+        except Exception as e:
+            set_request_to_exception(e, request)
+            raise
         self.call_response_hooks(resp)
         return resp
 
 
 class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
+    """Async HTTP client that extends httpx.AsyncClient"""
+
     async def send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
-        """Async HTTP client that extends httpx.AsyncClient"""
+        """Add following behaviors to httpx's async client.send()
+
+        - Set X-Request-ID header
+        - Dispatch request hooks
+        - Reconnect in case a connection is reset by peer (safe methods only)
+        - Retry on the configured policy (default: 503)
+        - Log exceptions
+        """
         log_data = self._build_log_data(request)
+        send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
-                return cast(ResponseExt, await self._send(request, **kwargs))
+                return cast(ResponseExt, await send_fn(request, **kwargs))
             except TransportError as e:
-                if "Connection reset by peer" in str(e):
+                if self._should_reconnect(e, request):
                     logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
-                    return cast(ResponseExt, await self._send(request, **kwargs))
+                    return cast(ResponseExt, await send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
-            set_request_to_exception(e, request)  # let retry_on chain request.retried on exception retries
+            set_request_to_exception(e, request)
             self._handle_error(e, request, log_data)
             raise
 
-    @retry_on(503, retry_after=15, safe_methods_only=True)
     async def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
         """Send a request"""
         await self.acall_request_hooks(request)
-        with self.set_timestamp(request):
-            resp = cast(ResponseExt, await super().send(request, **kwargs))
+        try:
+            with self.set_timestamp(request):
+                resp = cast(ResponseExt, await super().send(request, **kwargs))
+        except Exception as e:
+            set_request_to_exception(e, request)
+            raise
         await self.acall_response_hooks(resp)
         return resp

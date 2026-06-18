@@ -157,6 +157,42 @@ class TestRestClient:
 
         mock_close.assert_called_once()
 
+    def test_post_with_files_routes_payload_as_form_data(self, mocker: MockFixture) -> None:
+        """Test that post() routes extra kwargs as multipart form fields when files are provided"""
+        client = RestClient("http://example.com")
+        mock_inner = mocker.patch.object(client, "_request", return_value=mocker.MagicMock())
+
+        client.post("/upload", files={"file": (b"data",)}, title="hello", description="test")
+
+        mock_inner.assert_called_once()
+        call_kwargs = mock_inner.call_args.kwargs
+        assert call_kwargs.get("data") == {"title": "hello", "description": "test"}
+        assert "json" not in call_kwargs
+        assert call_kwargs.get("files") == {"file": (b"data",)}
+
+    def test_post_without_files_sends_payload_as_json(self, mocker: MockFixture) -> None:
+        """Test that post() sends extra kwargs as JSON when no files are provided"""
+        client = RestClient("http://example.com")
+        mock_inner = mocker.patch.object(client, "_request", return_value=mocker.MagicMock())
+
+        client.post("/users", name="alice", age=30)
+
+        call_kwargs = mock_inner.call_args.kwargs
+        assert call_kwargs.get("json") == {"name": "alice", "age": 30}
+        assert "data" not in call_kwargs
+
+    def test_post_with_files_only_sends_no_form_fields(self, mocker: MockFixture) -> None:
+        """Test that post() with files but no extra kwargs sends no form fields"""
+        client = RestClient("http://example.com")
+        mock_inner = mocker.patch.object(client, "_request", return_value=mocker.MagicMock())
+
+        client.post("/upload", files={"file": (b"data",)})
+
+        call_kwargs = mock_inner.call_args.kwargs
+        assert call_kwargs.get("data") is None
+        assert call_kwargs.get("files") == {"file": (b"data",)}
+        assert "json" not in call_kwargs
+
 
 class TestAsyncRestClient:
     """Tests for AsyncRestClient class"""
@@ -276,6 +312,34 @@ class TestAsyncRestClient:
             pass
 
         mock_close.assert_called_once()
+
+    async def test_post_with_files_routes_payload_as_form_data(self, mocker: MockFixture) -> None:
+        """Test that post() routes extra kwargs as multipart form fields when files are provided"""
+        client = AsyncRestClient("http://example.com")
+        mock_inner = mocker.patch.object(
+            client, "_request", new_callable=mocker.AsyncMock, return_value=mocker.MagicMock()
+        )
+
+        await client.post("/upload", files={"file": (b"data",)}, title="hello", description="test")
+
+        mock_inner.assert_called_once()
+        call_kwargs = mock_inner.call_args.kwargs
+        assert call_kwargs.get("data") == {"title": "hello", "description": "test"}
+        assert "json" not in call_kwargs
+        assert call_kwargs.get("files") == {"file": (b"data",)}
+
+    async def test_post_without_files_sends_payload_as_json_async(self, mocker: MockFixture) -> None:
+        """Test that post() sends extra kwargs as JSON when no files are provided"""
+        client = AsyncRestClient("http://example.com")
+        mock_inner = mocker.patch.object(
+            client, "_request", new_callable=mocker.AsyncMock, return_value=mocker.MagicMock()
+        )
+
+        await client.post("/users", name="alice", age=30)
+
+        call_kwargs = mock_inner.call_args.kwargs
+        assert call_kwargs.get("json") == {"name": "alice", "age": 30}
+        assert "data" not in call_kwargs
 
     async def test_http3_requires_https(self) -> None:
         """Test that http3() raises ValueError for non-https URLs"""

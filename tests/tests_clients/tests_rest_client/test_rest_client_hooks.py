@@ -7,8 +7,9 @@ from unittest.mock import MagicMock
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.ext import RequestExt
-from common_libs.clients.rest_client.hooks import get_hooks, request_hooks, response_hooks
+from common_libs.clients.rest_client.hooks import _print_api_summary, get_hooks, request_hooks, response_hooks
 from common_libs.clients.rest_client.rest_client import RestClient
+from common_libs.clients.rest_client.utils import TRUNCATE_LEN
 
 
 class TestGetHooks:
@@ -148,3 +149,74 @@ class TestHeaderMasking:
         logged_extra = mock_hooks_logger.info.call_args[1]["extra"]
         assert logged_extra["response_headers"]["Set-Cookie"] == "***"
         assert logged_extra["response_headers"]["Content-Type"] == "application/json"
+
+
+class TestPayloadTruncation:
+    """Tests that oversized payloads are truncated in API summary logs"""
+
+    def _make_request(self, mocker: MockFixture, body: bytes) -> MagicMock:
+        mock_request: MagicMock = mocker.MagicMock(spec=RequestExt)
+        mock_request.request_id = "trunc-req-id"
+        mock_request.method = "POST"
+        mock_request.url = "http://example.com/api"
+        mock_request.headers = {"Content-Type": "application/json"}
+        mock_request.extensions = {}
+        mock_request.read.return_value = body
+        return mock_request
+
+    def test_large_json_payload_is_truncated_in_summary(self, mocker: MockFixture) -> None:
+        """Test that a large JSON payload is truncated in the console summary"""
+        large_value = "v" * (TRUNCATE_LEN * 2)
+        body = f'{{"key": "{large_value}"}}'.encode()
+        mock_request = self._make_request(mocker, body)
+
+        mock_response = mocker.MagicMock()
+        mock_response.request = mock_request
+        mock_response.status_code = 200
+        mock_response.is_success = True
+        mock_response.is_stream = False
+        mock_response.elapsed.total_seconds.return_value = 0.1
+        mock_response.headers = {}
+        mock_response.reason_phrase = "OK"
+
+        mock_client = mocker.MagicMock()
+        mock_client.log_headers = False
+        mock_client.prettify_response_log = False
+
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp=None)
+
+        output = "".join(written)
+        assert "TRUNCATED" in output
+        assert large_value not in output
+
+    def test_small_payload_not_truncated_in_summary(self, mocker: MockFixture) -> None:
+        """Test that a small payload passes through the summary unchanged"""
+        body = b'{"key": "short"}'
+        mock_request = self._make_request(mocker, body)
+
+        mock_response = mocker.MagicMock()
+        mock_response.request = mock_request
+        mock_response.status_code = 200
+        mock_response.is_success = True
+        mock_response.is_stream = False
+        mock_response.elapsed.total_seconds.return_value = 0.1
+        mock_response.headers = {}
+        mock_response.reason_phrase = "OK"
+
+        mock_client = mocker.MagicMock()
+        mock_client.log_headers = False
+        mock_client.prettify_response_log = False
+
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp=None)
+
+        output = "".join(written)
+        assert "TRUNCATED" not in output
+        assert "short" in output

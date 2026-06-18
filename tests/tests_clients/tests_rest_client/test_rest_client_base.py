@@ -77,3 +77,18 @@ class TestRestClientBase:
         client.client.headers["Authorization"] = f"Bearer  {token}"  # two spaces
         result = client.get_bearer_token()
         assert result == token
+
+    def test_http2_enabled_by_default(self) -> None:
+        """Test that HTTP/2 is enabled by default when no http2 kwarg is supplied"""
+        client = RestClientBase("http://example.com")
+        assert isinstance(client.client, SyncHTTPClient)
+
+    def test_http2_can_be_disabled(self) -> None:
+        """Test that passing `http2=False` does not raise and creates the client successfully"""
+        client = RestClientBase("http://example.com", http2=False)
+        assert isinstance(client.client, SyncHTTPClient)
+
+    def test_http2_can_be_explicitly_enabled(self) -> None:
+        """Test that passing `http2=True` explicitly does not raise"""
+        client = RestClientBase("http://example.com", http2=True)
+        assert isinstance(client.client, SyncHTTPClient)

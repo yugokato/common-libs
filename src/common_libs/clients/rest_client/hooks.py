@@ -18,10 +18,11 @@ from .utils import (
     parse_query_strings,
     process_request_body,
     process_response,
+    truncate_body,
 )
 
 if TYPE_CHECKING:
-    from .ext import RequestExt, ResponseExt
+    from .ext import JSONType, RequestExt, ResponseExt
     from .rest_client import ClientType
 
 
@@ -51,40 +52,42 @@ def response_hooks(response: ResponseExt, quiet: bool, rest_client: ClientType) 
     Note: Combining these hooks under one hook function makes sure that the response log and the API summary are
           displayed as one message on the console for async mode.
     """
-    _log_response(response, quiet, rest_client)
-    _print_api_summary(response, quiet, rest_client)
+    if response.is_stream and response.is_success:
+        processed_resp: JSONType = "N/A (streaming)"
+    else:
+        processed_resp = process_response(response, prettify=rest_client.prettify_response_log)
+    _log_response(response, quiet, rest_client, processed_resp)
+    _print_api_summary(response, quiet, rest_client, processed_resp)
 
 
 def _log_request(request: RequestExt, quiet: bool) -> None:
     """Log API request"""
     if not quiet:
+        body = process_request_body(request, truncate_bytes=True)
         log_data = {
             "request_id": request.request_id,
             "request": f"{request.method.upper()} {request.url}",
             "method": request.method,
-            "path": request.url,
-            "payload": process_request_body(request),
+            "path": str(request.url),
+            "payload": body,
             "request_headers": mask_sensitive_headers(dict(request.headers)),
         }
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
+def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Log API response"""
     request: RequestExt = response.request
     log_data = {
         "request_id": request.request_id,
         "request": f"{request.method.upper()} {request.url}",
         "method": request.method,
-        "path": request.url,
+        "path": str(request.url),
         "status_code": response.status_code,
         "response_headers": mask_sensitive_headers(dict(response.headers)),
         "response_time": None if response.is_stream else response.elapsed.total_seconds(),
+        "response": processed_resp,
     }
-    if response.is_stream and response.is_success:
-        log_data.update(response="N/A (streaming)")
-    else:
-        log_data.update(response=process_response(response, prettify=rest_client.prettify_response_log))
 
     msg = f"response: {response.status_code}"
     if reason := get_response_reason(response):
@@ -98,15 +101,13 @@ def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType) -
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
+def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Print API request/response summary to the console"""
-    prettify = rest_client.prettify_response_log
     log_headers = rest_client.log_headers
     request: RequestExt = response.request
     if quiet:
         if not response.is_success:
             # Print to the console regardless of the "quiet" value
-            processed_resp = process_response(response, prettify=prettify)
             err = (
                 f"request_id: {request.request_id}\n"
                 f"request: {request.method} {request.url}\n"
@@ -145,6 +146,7 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
                     payload = request_body.decode("utf-8", errors="replace")
                 else:
                     payload = str(request_body)
+            payload = str(truncate_body(payload))
             summary += color(f"{bullet} payload: {payload}\n", color_code=ColorCodes.CYAN)
 
         # status_code and reason
@@ -157,16 +159,11 @@ def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientTy
         summary += "\n"
 
         # response
-        formatted_response: Any
-        if response.is_stream and response.is_success:
-            formatted_response = "N/A (streaming)"
-        else:
-            formatted_response = process_response(response, prettify=prettify)
         if not response.is_success:
-            formatted_response = color(formatted_response, color_code=ColorCodes.RED)
-        if formatted_response is not None:
+            processed_resp = color(processed_resp, color_code=ColorCodes.RED)
+        if processed_resp is not None:
             summary += color(f"{bullet} response: ", color_code=ColorCodes.CYAN)
-            summary += f"{formatted_response}\n"
+            summary += f"{processed_resp}\n"
 
         # response headers
         if log_headers:

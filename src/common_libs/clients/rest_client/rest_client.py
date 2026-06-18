@@ -12,7 +12,7 @@ from common_libs.logging import get_logger
 from .base import RestClientBase
 from .ext import ResponseExt, RestResponse
 from .hooks import get_hooks
-from .utils import manage_content_type
+from .utils import DEFAULT_RETRY_POLICY, RetryPolicy, manage_content_type
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -38,7 +38,13 @@ class RestClient(RestClientBase):
     """Sync Rest API client"""
 
     def __init__(
-        self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
+        self,
+        base_url: str,
+        *,
+        log_headers: bool = False,
+        prettify_response_log: bool = True,
+        retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        **kwargs: Any,
     ) -> None:
         try:
             asyncio.get_running_loop()
@@ -48,7 +54,9 @@ class RestClient(RestClientBase):
             raise RuntimeError(
                 f"{RestClient.__name__} cannot be used inside async context. Use {AsyncRestClient.__name__} instead."
             )
-        super().__init__(base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, **kwargs)
+        super().__init__(
+            base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, retry=retry, **kwargs
+        )
 
     def __enter__(self) -> Self:
         return self
@@ -77,9 +85,11 @@ class RestClient(RestClientBase):
         :param path: Endpoint path
         :param files: File to upload
         :param quiet: A flag to suppress API request/response log
-        :param payload: JSON payload
+        :param payload: JSON payload. When `files` is provided, these are sent as multipart form fields instead.
         """
-        return self._request("POST", path, json=payload, files=files, quiet=quiet)
+        if files:
+            return self._request("POST", path, data=payload or None, files=files, quiet=quiet)
+        return self._request("POST", path, json=payload, quiet=quiet)
 
     def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a DELETE API request
@@ -149,10 +159,21 @@ class AsyncRestClient(RestClientBase):
     """Async Rest API client"""
 
     def __init__(
-        self, base_url: str, *, log_headers: bool = False, prettify_response_log: bool = True, **kwargs: Any
+        self,
+        base_url: str,
+        *,
+        log_headers: bool = False,
+        prettify_response_log: bool = True,
+        retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
-            base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, async_mode=True, **kwargs
+            base_url,
+            log_headers=log_headers,
+            prettify_response_log=prettify_response_log,
+            async_mode=True,
+            retry=retry,
+            **kwargs,
         )
 
     @classmethod
@@ -216,9 +237,11 @@ class AsyncRestClient(RestClientBase):
         :param path: Endpoint path
         :param files: File to upload
         :param quiet: A flag to suppress API request/response log
-        :param payload: JSON payload
+        :param payload: JSON payload. When `files` is provided, these are sent as multipart form fields instead.
         """
-        return await self._request("POST", path, json=payload, files=files, quiet=quiet)
+        if files:
+            return await self._request("POST", path, data=payload or None, files=files, quiet=quiet)
+        return await self._request("POST", path, json=payload, quiet=quiet)
 
     async def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
         """Make a DELETE API request

@@ -56,7 +56,6 @@ redis-client = [
     "redis>=6.2.0",
 ]
 rest-client = [
-    "nest-asyncio2~=1.7.1", # experimental
     "httpx[http2]>=0.28.0",
 ]
 client = [

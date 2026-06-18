@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import inspect
 import json
+import time
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeAlias, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 from httpx import Client
@@ -23,13 +26,15 @@ P = ParamSpec("P")
 T = TypeVar("T")
 R = TypeVar("R", bound="RestResponse")
 
+RetryCondition: TypeAlias = int | type[Exception] | Sequence[int | type[Exception]] | Callable[..., bool]
+
 logger = get_logger(__name__)
 
 
 TRUNCATE_LEN = 512
 ORIGINAL_REQUEST_ATTR = "_original_request"
 SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
-_SENSITIVE_FIELD_NAMES = frozenset({"password"})
+_SENSITIVE_FIELD_NAMES = frozenset({"password", "token", "secret", "api_key", "apikey", "api-key"})
 _SENSITIVE_HEADER_NAMES = frozenset(
     {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key"}
 )
@@ -63,13 +68,18 @@ def mask_sensitive_value(body: Any, content_type: str) -> Any:
     """Mask a field value when a field name of the request body contains specific word"""
     if isinstance(body, dict):
         for k, v in body.items():
-            if isinstance(v, dict):
+            if any(part in k.lower() for part in _SENSITIVE_FIELD_NAMES):
+                if isinstance(v, list):
+                    body[k] = ["*" * len(item) if isinstance(item, str) else "***" for item in v]
+                elif isinstance(v, str):
+                    body[k] = "*" * len(v)
+                else:
+                    body[k] = "***"
+            elif isinstance(v, dict):
                 mask_sensitive_value(v, content_type)
             elif isinstance(v, list):
                 for nested_obj in v:
                     mask_sensitive_value(nested_obj, content_type)
-            elif isinstance(v, str) and any(part in k.lower() for part in _SENSITIVE_FIELD_NAMES):
-                body[k] = "*" * len(v)
     elif isinstance(body, str) and content_type == "application/x-www-form-urlencoded" and "=" in body:
         # Convert application/x-www-form-urlencoded data to a dictionary and mask sensitive values
         parsed_body = {k: v for p in body.split("&") if p and "=" in p for k, v in [p.split("=", 1)]}
@@ -134,17 +144,40 @@ def get_response_reason(response: ResponseExt) -> str:
             return ""
 
 
+def is_connection_reset(exc: BaseException) -> bool:
+    """Return True if `exc` or any chained exception represents a TCP connection-reset by peer.
+
+    :param exc: The exception to inspect, including its `__cause__` / `__context__` chain.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ConnectionResetError) or (
+            isinstance(current, OSError) and current.errno == errno.ECONNRESET
+        ):
+            return True
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return "Connection reset by peer" in str(exc)
+
+
 def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[Concatenate[ClientType, P], T]:
     """Set Content-Type: application/json header by default to a request whenever appropriate"""
 
     @wraps(f)
     def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> T:
+        if kwargs.get("json") == {}:
+            kwargs["json"] = None
         session_headers = self.client.headers
         raw_headers: Any = kwargs.get("headers")
         request_headers: dict[str, Any] = dict(raw_headers or {})
         merged = {**session_headers, **request_headers}
         has_content_type_header = "Content-Type" in [h.title() for h in merged]
-        if not has_content_type_header and (kwargs.get("json") or not any([kwargs.get("data"), kwargs.get("files")])):
+        if (
+            not has_content_type_header
+            and kwargs.get("json") is not None
+            and not any([kwargs.get("data"), kwargs.get("files")])
+        ):
             request_headers["Content-Type"] = "application/json"
             kwargs["headers"] = request_headers
         return f(self, *args, **kwargs)
@@ -152,8 +185,33 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
     return wrapper
 
 
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Policy controlling automatic HTTP request retry behavior.
+
+    Pass an instance to `RestClient` or `AsyncRestClient` via the `retry` parameter.
+    Use `retry=None` to disable automatic retries entirely.
+
+    :param condition: Status code(s), exception class(es), or a callable matching the retry trigger.
+                      Accepts the same forms as `retry_on`.
+    :param num_retries: Maximum number of retry attempts.
+    :param retry_after: Seconds to wait before retrying, or a callable that receives the response or
+                        exception and returns the wait time.
+    :param safe_methods_only: When `True`, only retries requests with safe HTTP methods
+                              (GET, HEAD, OPTIONS).
+    """
+
+    condition: RetryCondition = 503
+    num_retries: int = 1
+    retry_after: float | int | Callable[..., float | int] = 15
+    safe_methods_only: bool = True
+
+
+DEFAULT_RETRY_POLICY: RetryPolicy = RetryPolicy()
+
+
 def retry_on(
-    condition: int | type[Exception] | Sequence[int] | Sequence[type[Exception]] | Callable[[R | Exception], bool],
+    condition: int | type[Exception] | Sequence[int | type[Exception]] | Callable[[R | Exception], bool],
     num_retries: int = 1,
     retry_after: float | int | Callable[[R | Exception], float | int] = 5,
     safe_methods_only: bool = False,
@@ -162,126 +220,188 @@ def retry_on(
     """Retry the request if the given condition matches
 
     :param condition: Status code(s), exception class(es), or a callable taking the response or exception to retry on.
+                      A sequence may contain status codes, exception classes, or a mix of both.
                       When a callable is passed, it receives the response on HTTP-level retries, or the raised
                       exception when an exception-based retry occurs; the callable must handle both cases gracefully.
+                      When evaluated against a response, the callable must not raise — errors are not caught.
     :param num_retries: Max number of retries
     :param retry_after: Wait time before retrying in seconds; when the condition matched on an exception, a callable
-                        retry_after receives the raised exception instead of a response
+                        `retry_after` receives the raised exception instead of a response
     :param safe_methods_only: Retry only for safe HTTP methods (GET/HEAD/OPTIONS). For exception-based retries,
                               when the method cannot be determined (no request attached), the retry is skipped.
     :param _async_mode: Explicitly signal that the wrapped function executes async code
     """
+    status_codes: frozenset[int] | None = None
     exc_types: tuple[type[Exception], ...] | None = None
-    if isinstance(condition, type) and issubclass(condition, Exception):
-        condition = (condition,)
+    predicate: Callable[[R | Exception], bool] | None = None
 
-    if isinstance(condition, (tuple, list)):
-        if not condition:
+    if isinstance(condition, bool):
+        raise ValueError(f"Invalid condition: {condition!r}")
+    elif isinstance(condition, int):
+        status_codes = frozenset({condition})
+    elif isinstance(condition, type) and issubclass(condition, Exception):
+        exc_types = (condition,)
+    elif callable(condition) and not isinstance(condition, type):
+        predicate = condition
+    elif isinstance(condition, Sequence) and not isinstance(condition, (str, bytes, bytearray)):
+        items = tuple(condition)
+        if not items:
             raise ValueError("condition sequence must not be empty")
-        if all(isinstance(x, type) and issubclass(x, Exception) for x in condition):
-            exc_types = tuple(condition)
+        codes = [x for x in items if isinstance(x, int) and not isinstance(x, bool)]
+        excs = [x for x in items if isinstance(x, type) and issubclass(x, Exception)]
+        if len(codes) + len(excs) != len(items):
+            raise ValueError(
+                f"condition sequence must contain only status codes and/or exception classes: {condition!r}"
+            )
+        if codes:
+            status_codes = frozenset(codes)
+        if excs:
+            exc_types = cast("tuple[type[Exception], ...]", tuple(excs))
+    else:
+        raise ValueError(f"Invalid condition: {condition!r}")
 
-    # True when condition is a plain callable (not an exception class or sequence of exception classes)
-    is_callable_condition = callable(condition) and not isinstance(condition, type)
+    is_callable_condition = predicate is not None
 
     def matches_condition(resp: R | None, exc: Exception | None) -> bool:
         if exc is not None:
             if exc_types is not None:
                 return True  # already type-filtered in call()
-            # callable condition — try to evaluate against the exception
-            if is_callable_condition:
+            if predicate is not None:
                 try:
-                    return bool(condition(exc))  # type: ignore
+                    return bool(predicate(exc))
                 except Exception:
                     return False
-            return False  # non-callable condition cannot match an exception; unreachable in practice
+            return False
         # exc is None — evaluate against the response
-        if exc_types is not None:
-            return False  # exception-based condition but no exception raised (e.g. after a successful retry)
         assert resp is not None
-        if isinstance(condition, int):
-            return resp.status_code == condition
-        elif isinstance(condition, tuple | list) and all(isinstance(x, int) for x in condition):
-            return resp.status_code in condition
-        elif is_callable_condition:
-            return condition(resp)  # type: ignore
-        else:
-            raise ValueError(f"Invalid condition: {condition}")
+        if status_codes is not None:
+            return resp.status_code in status_codes
+        if predicate is not None:
+            return bool(predicate(resp))
+        return False  # exception-based condition but no exception raised (e.g. after a successful retry)
 
-    async def _retry_on(f: Callable[P, R | Awaitable[R]], *args: P.args, **kwargs: P.kwargs) -> R:
+    def _get_retry_context(
+        request: RequestExt | None, resp: R | None, exc: Exception | None
+    ) -> tuple[float | int, str, dict[str, Any]]:
+        """Compute the wait duration, log message, and log extras for a pending retry attempt."""
+        if exc is not None:
+            wait_secs = retry_after(exc) if callable(retry_after) else retry_after
+            msg = "Retry condition matched." if is_callable_condition else f"Exception {type(exc).__name__} raised."
+            log_extra: dict[str, Any] = {"exception": f"{type(exc)}: {exc!s}"}
+        else:
+            assert resp is not None
+            assert request is not None
+            wait_secs = retry_after(resp) if callable(retry_after) else retry_after
+            msg = "Retry condition matched." if is_callable_condition else f"Received status code {resp.status_code}."
+            log_extra = {
+                "status_code": resp.status_code,
+                "response": process_response(resp, prettify=True),
+                "request_id": request.request_id,
+            }
+        return wait_secs, msg, log_extra
+
+    def _log_retry(wait_secs: float | int, msg: str, log_extra: dict[str, Any]) -> None:
+        logger.warning(f"{msg} Retrying in {wait_secs} seconds...", extra=log_extra)
+
+    def _log_exhausted(num_retried: int, condition_matched: bool, resp: R | None, exc: Exception | None) -> None:
+        if num_retried > 0 and condition_matched:
+            text = f"{num_retried} times" if num_retried > 1 else "once"
+            if exc is not None:
+                reason = f"raised {type(exc).__name__}"
+            else:
+                assert resp is not None
+                reason = (
+                    "matches the condition" if is_callable_condition else f"received status code {resp.status_code}"
+                )
+            logger.warning(f"Retried {text} but request still {reason}")
+
+    def _should_swallow(e: Exception) -> bool:
+        """Return True when `e` matches the retry condition and should be captured rather than propagated."""
+        if exc_types is not None:
+            return isinstance(e, exc_types)
+        return is_callable_condition
+
+    def _prepare_retry(
+        resp: R | None, exc: Exception | None, num_retried: int
+    ) -> tuple[RequestExt | None, float | int] | None:
+        """Decide whether to retry, logging the outcome.
+
+        Return `(request, wait_secs)` when a retry should happen, or `None` to stop.
+        """
+        matched = matches_condition(resp, exc)
+        if num_retried >= num_retries or not matched:
+            _log_exhausted(num_retried, matched, resp, exc)
+            return None
+        if exc is not None:
+            request = get_request_from_exception(exc)
+        else:
+            assert resp is not None
+            request = resp.request
+        if safe_methods_only and (request is None or request.method.upper() not in SAFE_HTTP_METHODS):
+            logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
+            return None
+        wait_secs, msg, log_extra = _get_retry_context(request, resp, exc)
+        _log_retry(wait_secs, msg, log_extra)
+        return request, wait_secs
+
+    def _finalize(resp: R | None, exc: Exception | None) -> R:
+        """Raise the final exception if one is set, otherwise return the final response."""
+        if exc is not None:
+            raise exc
+        assert resp is not None
+        return resp
+
+    def _retry_sync(f: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+        def call() -> tuple[R | None, Exception | None]:
+            try:
+                return f(*args, **kwargs), None
+            except Exception as e:
+                if not _should_swallow(e):
+                    raise
+                return None, e
+
+        resp, exc = call()
+        num_retried = 0
+        while (plan := _prepare_retry(resp, exc, num_retried)) is not None:
+            request, wait_secs = plan
+            time.sleep(wait_secs)
+            resp, exc = call()
+            if resp is not None and request is not None:
+                resp.request.retried = request
+            num_retried += 1
+        return _finalize(resp, exc)
+
+    async def _retry_async(f: Callable[P, R | Awaitable[R]], *args: P.args, **kwargs: P.kwargs) -> R:
         async def call() -> tuple[R | None, Exception | None]:
-            """Run f once. Return (response, None), or (None, exc) when a matching exception is caught."""
             try:
                 r = f(*args, **kwargs)
                 if inspect.isawaitable(r):
                     r = await r
                 return r, None
             except Exception as e:
-                if exc_types is not None:
-                    if not isinstance(e, exc_types):
-                        raise
-                elif not is_callable_condition:
+                if not _should_swallow(e):
                     raise
                 return None, e
 
         resp, exc = await call()
         num_retried = 0
-        log_extra: dict[str, Any]
-        while num_retried < num_retries and matches_condition(resp, exc):
-            if exc is not None:
-                request = get_request_from_exception(exc)  # may be None when no request was injected
-                if safe_methods_only and (request is None or request.method.upper() not in SAFE_HTTP_METHODS):
-                    logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
-                    raise exc
-                wait_secs = retry_after(exc) if callable(retry_after) else retry_after
-                msg = "Retry condition matched." if callable(condition) else f"Exception {type(exc).__name__} raised."
-                log_extra = {"exception": f"{type(exc)}: {exc!s}"}
-            else:
-                assert resp is not None
-                request = resp.request
-                if safe_methods_only and request.method.upper() not in SAFE_HTTP_METHODS:
-                    logger.warning("Retry condition matched but skipped (safe_methods_only=True).")
-                    return resp
-                wait_secs = retry_after(resp) if callable(retry_after) else retry_after
-                msg = "Retry condition matched." if callable(condition) else f"Received status code {resp.status_code}."
-                log_extra = {
-                    "status_code": resp.status_code,
-                    "response": process_response(resp, prettify=True),
-                    "request_id": request.request_id,
-                }
-            msg += f" Retrying in {wait_secs} seconds..."
-            logger.warning(msg, extra=log_extra)
-
+        while (plan := _prepare_retry(resp, exc, num_retried)) is not None:
+            request, wait_secs = plan
             await asyncio.sleep(wait_secs)
-
             resp, exc = await call()
-            if exc is None and request is not None:
-                assert resp is not None
+            if resp is not None and request is not None:
                 resp.request.retried = request
             num_retried += 1
-
-        if num_retried > 0 and matches_condition(resp, exc):
-            text = f"{num_retries} times" if num_retries > 1 else "once"
-            if exc is not None:
-                reason = f"raised {type(exc).__name__}"
-            else:
-                assert resp is not None
-                reason = "matches the condition" if callable(condition) else f"received status code {resp.status_code}"
-            logger.warning(f"Retried {text} but request still {reason}")
-
-        if exc is not None:
-            raise exc
-        assert resp is not None
-        return resp
+        return _finalize(resp, exc)
 
     def decorator(f: Callable[P, R | Awaitable[R]]) -> Callable[P, R | Awaitable[R]]:
         @wraps(f)
         async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            return await _retry_on(f, *args, **kwargs)
+            return await _retry_async(f, *args, **kwargs)
 
         @wraps(f)
         def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            return asyncio.run(_retry_on(f, *args, **kwargs))
+            return _retry_sync(f, *args, **kwargs)  # type: ignore[arg-type]
 
         if _async_mode or inspect.iscoroutinefunction(f):
             return async_wrapper
@@ -314,6 +434,16 @@ def get_request_from_exception(exc: BaseException) -> RequestExt | None:
     :param exc: Exception possibly carrying an attached request
     """
     return getattr(exc, ORIGINAL_REQUEST_ATTR, None)
+
+
+def truncate_body(value: str | bytes) -> str | bytes:
+    """Truncate a request/response body string or bytes when it exceeds the log threshold.
+
+    :param value: The body string or bytes to truncate.
+    """
+    if len(value) > TRUNCATE_LEN:
+        return _truncate(value)
+    return value
 
 
 def _decode_utf8(obj: Any) -> Any:
