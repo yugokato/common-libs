@@ -7,7 +7,8 @@ from httpx._types import TimeoutTypes
 from common_libs.logging import get_logger
 
 from .ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
-from .utils import DEFAULT_RETRY_POLICY, RetryPolicy
+from .types import RetryPolicy
+from .utils import DEFAULT_RETRY_POLICY
 
 logger = get_logger(__name__)
 

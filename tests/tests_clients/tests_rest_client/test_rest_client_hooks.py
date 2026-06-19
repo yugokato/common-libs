@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.ext import RequestExt
 from common_libs.clients.rest_client.hooks import _print_api_summary, get_hooks, request_hooks, response_hooks
 from common_libs.clients.rest_client.rest_client import RestClient
+from common_libs.clients.rest_client.types import Request
 from common_libs.clients.rest_client.utils import TRUNCATE_LEN
 
 
@@ -53,7 +53,7 @@ class TestRequestHooks:
 
     def test_request_hooks_logs_when_not_quiet(self, mock_hooks_logger: MagicMock, mocker: MockFixture) -> None:
         """Test that request_hooks logs the request when not quiet"""
-        mock_request = mocker.MagicMock(spec=RequestExt)
+        mock_request = mocker.MagicMock(spec=Request)
         mock_request.request_id = "hook-req-id"
         mock_request.method = "GET"
         mock_request.url = "http://example.com/api"
@@ -66,7 +66,7 @@ class TestRequestHooks:
 
     def test_request_hooks_skips_when_quiet(self, mock_hooks_logger: MagicMock, mocker: MockFixture) -> None:
         """Test that request_hooks does not log when quiet=True"""
-        mock_request = mocker.MagicMock(spec=RequestExt)
+        mock_request = mocker.MagicMock(spec=Request)
         mock_request.request_id = "hook-req-id-quiet"
 
         request_hooks(mock_request, quiet=True)
@@ -107,7 +107,7 @@ class TestHeaderMasking:
     """Tests that sensitive headers are masked in structured log records"""
 
     def _make_request(self, mocker: MockFixture, headers: dict[str, Any]) -> MagicMock:
-        mock_request: MagicMock = mocker.MagicMock(spec=RequestExt)
+        mock_request: MagicMock = mocker.MagicMock(spec=Request)
         mock_request.request_id = "req-mask-test"
         mock_request.method = "GET"
         mock_request.url = "http://example.com/api"
@@ -155,7 +155,7 @@ class TestPayloadTruncation:
     """Tests that oversized payloads are truncated in API summary logs"""
 
     def _make_request(self, mocker: MockFixture, body: bytes) -> MagicMock:
-        mock_request: MagicMock = mocker.MagicMock(spec=RequestExt)
+        mock_request: MagicMock = mocker.MagicMock(spec=Request)
         mock_request.request_id = "trunc-req-id"
         mock_request.method = "POST"
         mock_request.url = "http://example.com/api"

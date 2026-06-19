@@ -6,19 +6,19 @@ import inspect
 import json
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeAlias, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 from urllib.parse import parse_qs, urlparse
 
 from httpx import Client
 
 from common_libs.logging import get_logger
 
+from .types import JSONType, Request, Response, RestResponse, RetryPolicy
+
 if TYPE_CHECKING:
-    from .ext import JSONType, RequestExt, ResponseExt, RestResponse
     from .rest_client import ClientType
 
 
@@ -26,11 +26,10 @@ P = ParamSpec("P")
 T = TypeVar("T")
 R = TypeVar("R", bound="RestResponse")
 
-RetryCondition: TypeAlias = int | type[Exception] | Sequence[int | type[Exception]] | Callable[..., bool]
-
 logger = get_logger(__name__)
 
 
+DEFAULT_RETRY_POLICY = RetryPolicy()
 TRUNCATE_LEN = 512
 ORIGINAL_REQUEST_ATTR = "_original_request"
 SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
@@ -41,7 +40,7 @@ _SENSITIVE_HEADER_NAMES = frozenset(
 
 
 def process_request_body(
-    request: RequestExt, hide_sensitive_values: bool = True, truncate_bytes: bool = False
+    request: Request, hide_sensitive_values: bool = True, truncate_bytes: bool = False
 ) -> str | bytes:
     """Process request body"""
     body = request.read()
@@ -101,10 +100,8 @@ def mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
     return {k: ("***" if k.lower() in _SENSITIVE_HEADER_NAMES else v) for k, v in headers.items()}
 
 
-def process_response(response: ResponseExt | RestResponse, prettify: bool = False) -> JSONType:
+def process_response(response: Response | RestResponse, prettify: bool = False) -> JSONType:
     """Get json-encoded content of a response if possible, otherwise return content of the response"""
-    from .ext import RestResponse
-
     if isinstance(response, RestResponse):
         response = response._response
 
@@ -133,7 +130,7 @@ def parse_query_strings(url: str) -> dict[str, Any] | None:
     return None
 
 
-def get_response_reason(response: ResponseExt) -> str:
+def get_response_reason(response: Response) -> str:
     """Get response reason from the response. If the response doesn't have the value, we resolve it using HTTPStatus"""
     if response.reason_phrase:
         return response.reason_phrase
@@ -183,31 +180,6 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
         return f(self, *args, **kwargs)
 
     return wrapper
-
-
-@dataclass(frozen=True)
-class RetryPolicy:
-    """Policy controlling automatic HTTP request retry behavior.
-
-    Pass an instance to `RestClient` or `AsyncRestClient` via the `retry` parameter.
-    Use `retry=None` to disable automatic retries entirely.
-
-    :param condition: Status code(s), exception class(es), or a callable matching the retry trigger.
-                      Accepts the same forms as `retry_on`.
-    :param num_retries: Maximum number of retry attempts.
-    :param retry_after: Seconds to wait before retrying, or a callable that receives the response or
-                        exception and returns the wait time.
-    :param safe_methods_only: When `True`, only retries requests with safe HTTP methods
-                              (GET, HEAD, OPTIONS).
-    """
-
-    condition: RetryCondition = 503
-    num_retries: int = 1
-    retry_after: float | int | Callable[..., float | int] = 15
-    safe_methods_only: bool = True
-
-
-DEFAULT_RETRY_POLICY: RetryPolicy = RetryPolicy()
 
 
 def retry_on(
@@ -281,7 +253,7 @@ def retry_on(
         return False  # exception-based condition but no exception raised (e.g. after a successful retry)
 
     def _get_retry_context(
-        request: RequestExt | None, resp: R | None, exc: Exception | None
+        request: Request | None, resp: R | None, exc: Exception | None
     ) -> tuple[float | int, str, dict[str, Any]]:
         """Compute the wait duration, log message, and log extras for a pending retry attempt."""
         if exc is not None:
@@ -323,7 +295,7 @@ def retry_on(
 
     def _prepare_retry(
         resp: R | None, exc: Exception | None, num_retried: int
-    ) -> tuple[RequestExt | None, float | int] | None:
+    ) -> tuple[Request | None, float | int] | None:
         """Decide whether to retry, logging the outcome.
 
         Return `(request, wait_secs)` when a retry should happen, or `None` to stop.
@@ -419,7 +391,7 @@ def get_supported_request_parameters() -> list[str]:
     return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
 
 
-def set_request_to_exception(exc: BaseException, request: RequestExt) -> None:
+def set_request_to_exception(exc: BaseException, request: Request) -> None:
     """Attach the original request to an exception so retry_on can chain it via request.retried
 
     :param exc: Exception to attach the request to
@@ -428,7 +400,7 @@ def set_request_to_exception(exc: BaseException, request: RequestExt) -> None:
     setattr(exc, ORIGINAL_REQUEST_ATTR, request)
 
 
-def get_request_from_exception(exc: BaseException) -> RequestExt | None:
+def get_request_from_exception(exc: BaseException) -> Request | None:
     """Return the original request attached to an exception by set_original_request, if any
 
     :param exc: Exception possibly carrying an attached request

@@ -12,12 +12,12 @@ import pytest
 from pytest import FixtureRequest
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.ext import RequestExt, RestResponse
+from common_libs.clients.rest_client import RetryPolicy
 from common_libs.clients.rest_client.rest_client import AsyncRestClient
+from common_libs.clients.rest_client.types import Request, RestResponse
 from common_libs.clients.rest_client.utils import (
     DEFAULT_RETRY_POLICY,
     TRUNCATE_LEN,
-    RetryPolicy,
     get_response_reason,
     get_supported_request_parameters,
     is_connection_reset,
@@ -752,7 +752,7 @@ class TestRetryOn:
         self, mock_response_factory: Callable[..., MagicMock], mode: str
     ) -> None:
         """Test that a successful retry after an exception sets request.retried to the original request"""
-        original_request = MagicMock(spec=RequestExt)
+        original_request = MagicMock(spec=Request)
         mock_ok = mock_response_factory(200)
         call_count = 0
 
@@ -969,7 +969,7 @@ class TestRetryOn:
     ) -> None:
         """Test that safe_methods_only=True skips exception retry for non-safe methods like POST"""
         mock_logger = mocker.patch("common_libs.clients.rest_client.utils.logger")
-        mock_request = MagicMock(spec=RequestExt)
+        mock_request = MagicMock(spec=Request)
         mock_request.method = "POST"
         call_count = 0
 
@@ -1003,7 +1003,7 @@ class TestRetryOn:
         self, mock_response_factory: Callable[..., MagicMock], mode: str
     ) -> None:
         """Test that safe_methods_only=True allows exception retry for safe methods like GET"""
-        mock_request = MagicMock(spec=RequestExt)
+        mock_request = MagicMock(spec=Request)
         mock_request.method = "GET"
         mock_ok = mock_response_factory(200)
         call_count = 0

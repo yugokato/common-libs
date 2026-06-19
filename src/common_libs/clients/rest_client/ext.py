@@ -2,30 +2,25 @@ from __future__ import annotations
 
 import traceback
 import uuid
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import partial
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, cast
 
-from httpx import AsyncClient, Request, Response, TimeoutException, TransportError
+from httpx import AsyncClient, TimeoutException, TransportError
 from httpx import Client as SyncClient
 from httpx._auth import Auth
 
 from common_libs.logging import get_logger
 
+from .types import Request, Response, RetryPolicy
 from .utils import (
     DEFAULT_RETRY_POLICY,
     SAFE_HTTP_METHODS,
-    RetryPolicy,
     is_connection_reset,
-    process_response,
     retry_on,
     set_request_to_exception,
 )
-
-JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
 
 logger = get_logger(__name__)
 
@@ -34,111 +29,9 @@ class BearerAuth(Auth):
     def __init__(self, token: str) -> None:
         self.token = token
 
-    def auth_flow(self, request: RequestExt) -> Generator[RequestExt]:
+    def auth_flow(self, request: Request) -> Generator[Request]:
         request.headers["Authorization"] = f"Bearer {self.token}"
         yield request
-
-
-class RequestExt(Request):
-    """Extended Request class to add the following capabilities:
-
-    - generates a request UUID for each request
-    - add request start_time and end_time
-    - store retried request
-    """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.request_id: str = str(uuid.uuid4())
-        self.start_time: datetime | None = None
-        self.end_time: datetime | None = None
-        self.retried: RequestExt | None = None
-
-
-class ResponseExt(Response):
-    """Extended Response class"""
-
-    request: RequestExt
-    is_stream: bool = False
-
-
-@dataclass(frozen=True)
-class RestResponse:
-    """Response class that wraps the httpx Response object"""
-
-    # raw response returned from httpx lib
-    _response: ResponseExt = field(init=True)
-
-    request_id: str = field(init=False)
-    status_code: int = field(init=False)
-    response: Any = field(init=False)
-    response_time: float | None = field(init=False)
-    request: RequestExt = field(init=False)
-    ok: bool = field(init=False)
-    is_stream: bool = field(init=False)
-
-    def __post_init__(self) -> None:
-        is_stream = self._response.is_stream
-        object.__setattr__(self, "request_id", self._response.request.request_id)
-        object.__setattr__(self, "status_code", self._response.status_code)
-        object.__setattr__(self, "response_time", None if is_stream else self._response.elapsed.total_seconds())
-        if is_stream and self._response.is_success:
-            object.__setattr__(self, "response", None)
-        else:
-            object.__setattr__(self, "response", self._process_response(self._response))
-        object.__setattr__(self, "request", self._response.request)
-        object.__setattr__(self, "ok", self._response.is_success)
-        object.__setattr__(self, "is_stream", is_stream)
-
-    def raise_for_status(self) -> None:
-        self._response.raise_for_status()
-
-    def stream(
-        self, mode: Literal["text", "bytes", "line", "raw"] = "text", chunk_size: int | None = None
-    ) -> Generator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions"""
-        if not self.is_stream:
-            raise ValueError("This response is not a stream")
-
-        if mode == "text":
-            iter_func = partial(self._response.iter_text, chunk_size=chunk_size)
-        elif mode == "bytes":
-            iter_func = partial(self._response.iter_bytes, chunk_size=chunk_size)
-        elif mode == "line":
-            if chunk_size:
-                raise ValueError("chunk size is not supported for line-by-line streaming")
-            iter_func = self._response.iter_lines
-        elif mode == "raw":
-            iter_func = partial(self._response.iter_raw, chunk_size=chunk_size)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-        yield from iter_func()
-
-    async def astream(
-        self, mode: Literal["text", "bytes", "line", "raw"] = "text", chunk_size: int | None = None
-    ) -> AsyncGenerator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions (for async)"""
-        if not self.is_stream:
-            raise ValueError("This response is not a stream")
-
-        if mode == "text":
-            iter_func = partial(self._response.aiter_text, chunk_size=chunk_size)
-        elif mode == "bytes":
-            iter_func = partial(self._response.aiter_bytes, chunk_size=chunk_size)
-        elif mode == "line":
-            if chunk_size:
-                raise ValueError("chunk size is not supported for line-by-line streaming")
-            iter_func = self._response.aiter_lines
-        elif mode == "raw":
-            iter_func = partial(self._response.aiter_raw, chunk_size=chunk_size)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-        async for d in iter_func():
-            yield d
-
-    def _process_response(self, response: ResponseExt) -> JSONType:
-        """Get json-encoded content of a response if possible, otherwise return content of the response."""
-        return process_response(response)
 
 
 class HTTPClientMixin:
@@ -165,38 +58,36 @@ class HTTPClientMixin:
         )
         super().__init__(*args, **kwargs)
 
-    def build_request(self, *args: Any, **kwargs: Any) -> RequestExt:
+    def build_request(self, *args: Any, **kwargs: Any) -> Request:
         request = super().build_request(*args, **kwargs)  # type: ignore[misc]
         return self._modify_request(request)
 
-    def _build_redirect_request(self, *args: Any, **kwargs: Any) -> RequestExt:
+    def _build_redirect_request(self, *args: Any, **kwargs: Any) -> Request:
         request = super()._build_redirect_request(*args, **kwargs)  # type: ignore[misc]
         return self._modify_request(request)
 
-    def call_request_hooks(self, request: RequestExt) -> None:
+    def call_request_hooks(self, request: Request) -> None:
         """Call request hooks"""
         hooks = request.extensions.get("hooks", {})
         for request_hook in hooks.get("request", []):
             request_hook(request)
 
-    async def acall_request_hooks(self, request: RequestExt) -> None:
+    async def acall_request_hooks(self, request: Request) -> None:
         """Call request hooks (for async mode)"""
         hooks = request.extensions.get("hooks", {})
         for request_hook in hooks.get("request", []):
             await request_hook(request)
 
-    def call_response_hooks(self, response: ResponseExt) -> None:
+    def call_response_hooks(self, response: Response) -> None:
         """Call response hooks"""
-        response.is_stream = not response.is_closed
         if response.is_stream and not response.is_success:
             response.read()
         hooks = response.request.extensions.get("hooks", {})
         for response_hook in hooks.get("response", []):
             response_hook(response)
 
-    async def acall_response_hooks(self, response: ResponseExt) -> None:
+    async def acall_response_hooks(self, response: Response) -> None:
         """Call response hooks (for async mode)"""
-        response.is_stream = not response.is_closed
         if response.is_stream and not response.is_success:
             await response.aread()
         hooks = response.request.extensions.get("hooks", {})
@@ -204,7 +95,7 @@ class HTTPClientMixin:
             await response_hook(response)
 
     @contextmanager
-    def set_timestamp(self, request: RequestExt) -> Generator[None]:
+    def set_timestamp(self, request: Request) -> Generator[None]:
         """Set request start/end time
 
         :param request: Request
@@ -215,7 +106,7 @@ class HTTPClientMixin:
         finally:
             request.end_time = datetime.now(tz=UTC)
 
-    def _modify_request(self, request: Request) -> RequestExt:
+    def _modify_request(self, request: Request) -> Request:
         request_id = request.headers.get(self._request_id_header)
         if not request_id:
             request_id = str(uuid.uuid4())
@@ -224,9 +115,13 @@ class HTTPClientMixin:
         request.start_time = None
         request.end_time = None
         request.retried = None
-        return cast(RequestExt, request)
+        return request
 
-    def _build_log_data(self, request: RequestExt) -> dict[str, str]:
+    def _modify_response(self, response: Response) -> Response:
+        response.is_stream = not response.is_closed
+        return response
+
+    def _build_log_data(self, request: Request) -> dict[str, str]:
         return {
             "request_id": request.request_id,
             "request": f"{request.method.upper()} {request.url}",
@@ -234,7 +129,7 @@ class HTTPClientMixin:
             "path": str(request.url),
         }
 
-    def _handle_error(self, e: Exception, request: RequestExt, log_data: dict[str, str]) -> None:
+    def _handle_error(self, e: Exception, request: Request, log_data: dict[str, str]) -> None:
         log_data["traceback"] = traceback.format_exc()
         if isinstance(e, TimeoutException):
             logger.error(
@@ -249,7 +144,7 @@ class HTTPClientMixin:
                 extra=log_data,
             )
 
-    def _should_reconnect(self, exc: TransportError, request: RequestExt) -> bool:
+    def _should_reconnect(self, exc: TransportError, request: Request) -> bool:
         """Return True if the request should be transparently reconnected after a connection reset.
 
         :param exc: The transport error that was raised.
@@ -261,7 +156,7 @@ class HTTPClientMixin:
 class SyncHTTPClient(HTTPClientMixin, SyncClient):
     """Sync HTTP client that extends httpx.Client"""
 
-    def send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
+    def send(self, request: Request, **kwargs: Any) -> Response:
         """Add following behaviors to httpx's client.send()
 
         - Set X-Request-ID header
@@ -274,11 +169,11 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
-                return cast(ResponseExt, send_fn(request, **kwargs))
+                return cast(Response, send_fn(request, **kwargs))
             except TransportError as e:
                 if self._should_reconnect(e, request):
                     logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
-                    return cast(ResponseExt, send_fn(request, **kwargs))
+                    return cast(Response, send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
@@ -286,15 +181,16 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
             self._handle_error(e, request, log_data)
             raise
 
-    def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
+    def _send(self, request: Request, **kwargs: Any) -> Response:
         """Send a request"""
         self.call_request_hooks(request)
         try:
             with self.set_timestamp(request):
-                resp = cast(ResponseExt, super().send(request, **kwargs))
+                resp = cast(Response, super().send(request, **kwargs))
         except Exception as e:
             set_request_to_exception(e, request)
             raise
+        self._modify_response(resp)
         self.call_response_hooks(resp)
         return resp
 
@@ -302,7 +198,7 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
 class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
     """Async HTTP client that extends httpx.AsyncClient"""
 
-    async def send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
+    async def send(self, request: Request, **kwargs: Any) -> Response:
         """Add following behaviors to httpx's async client.send()
 
         - Set X-Request-ID header
@@ -315,11 +211,11 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
-                return cast(ResponseExt, await send_fn(request, **kwargs))
+                return cast(Response, await send_fn(request, **kwargs))
             except TransportError as e:
                 if self._should_reconnect(e, request):
                     logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
-                    return cast(ResponseExt, await send_fn(request, **kwargs))
+                    return cast(Response, await send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
@@ -327,14 +223,15 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
             self._handle_error(e, request, log_data)
             raise
 
-    async def _send(self, request: RequestExt, **kwargs: Any) -> ResponseExt:
+    async def _send(self, request: Request, **kwargs: Any) -> Response:
         """Send a request"""
         await self.acall_request_hooks(request)
         try:
             with self.set_timestamp(request):
-                resp = cast(ResponseExt, await super().send(request, **kwargs))
+                resp = cast(Response, await super().send(request, **kwargs))
         except Exception as e:
             set_request_to_exception(e, request)
             raise
+        self._modify_response(resp)
         await self.acall_response_hooks(resp)
         return resp

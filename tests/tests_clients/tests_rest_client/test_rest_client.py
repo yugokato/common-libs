@@ -8,8 +8,9 @@ from unittest.mock import MagicMock
 import pytest
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.ext import AsyncHTTPClient, RestResponse, SyncHTTPClient
+from common_libs.clients.rest_client.ext import AsyncHTTPClient, SyncHTTPClient
 from common_libs.clients.rest_client.rest_client import AsyncRestClient, RestClient, inject_hooks
+from common_libs.clients.rest_client.types import RestResponse
 
 
 class TestInjectHooks:

@@ -4,15 +4,15 @@ import asyncio
 from collections.abc import AsyncGenerator, Callable, Generator
 from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
-from typing import Any, Concatenate, ParamSpec, Self, TypeVar, cast
+from typing import Any, Concatenate, ParamSpec, Self, TypeVar
 from urllib.parse import urlparse
 
 from common_libs.logging import get_logger
 
 from .base import RestClientBase
-from .ext import ResponseExt, RestResponse
 from .hooks import get_hooks
-from .utils import DEFAULT_RETRY_POLICY, RetryPolicy, manage_content_type
+from .types import RestResponse, RetryPolicy
+from .utils import DEFAULT_RETRY_POLICY, manage_content_type
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -152,7 +152,7 @@ class RestClient(RestClientBase):
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         r = self.client.request(method.upper(), path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
+        return RestResponse(r)
 
 
 class AsyncRestClient(RestClientBase):
@@ -306,4 +306,4 @@ class AsyncRestClient(RestClientBase):
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         r = await self.client.request(method.upper(), path, **raw_options)
-        return RestResponse(cast(ResponseExt, r))
+        return RestResponse(r)

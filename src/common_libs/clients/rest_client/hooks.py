@@ -22,8 +22,8 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from .ext import JSONType, RequestExt, ResponseExt
     from .rest_client import ClientType
+    from .types import JSONType, Request, Response
 
 
 logger = get_logger(__name__)
@@ -41,12 +41,12 @@ def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[.
     return rest_client._hooks_cache[quiet]
 
 
-def request_hooks(request: RequestExt, quiet: bool) -> None:
+def request_hooks(request: Request, quiet: bool) -> None:
     """Request hooks"""
     _log_request(request, quiet)
 
 
-def response_hooks(response: ResponseExt, quiet: bool, rest_client: ClientType) -> None:
+def response_hooks(response: Response, quiet: bool, rest_client: ClientType) -> None:
     """Response hooks
 
     Note: Combining these hooks under one hook function makes sure that the response log and the API summary are
@@ -60,7 +60,7 @@ def response_hooks(response: ResponseExt, quiet: bool, rest_client: ClientType) 
     _print_api_summary(response, quiet, rest_client, processed_resp)
 
 
-def _log_request(request: RequestExt, quiet: bool) -> None:
+def _log_request(request: Request, quiet: bool) -> None:
     """Log API request"""
     if not quiet:
         body = process_request_body(request, truncate_bytes=True)
@@ -75,9 +75,9 @@ def _log_request(request: RequestExt, quiet: bool) -> None:
         logger.info(f"request: {request.method} {request.url}", extra=log_data)
 
 
-def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
+def _log_response(response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Log API response"""
-    request: RequestExt = response.request
+    request: Request = response.request
     log_data = {
         "request_id": request.request_id,
         "request": f"{request.method.upper()} {request.url}",
@@ -101,10 +101,10 @@ def _log_response(response: ResponseExt, quiet: bool, rest_client: ClientType, p
         logger.error(msg, extra=log_data)
 
 
-def _print_api_summary(response: ResponseExt, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
+def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Print API request/response summary to the console"""
     log_headers = rest_client.log_headers
-    request: RequestExt = response.request
+    request: Request = response.request
     if quiet:
         if not response.is_success:
             # Print to the console regardless of the "quiet" value
@@ -194,11 +194,11 @@ def _hook_factory(
         else:
             return quiet and request_or_response.is_success
 
-    def sync_hook(request_or_response: RequestExt | ResponseExt) -> Any:
+    def sync_hook(request_or_response: Request | Response) -> Any:
         if not should_skip(request_or_response):
             return hook_func(request_or_response, quiet, *hook_args, **hook_kwargs)
 
-    async def async_hook(request_or_response: RequestExt | ResponseExt) -> Any:
+    async def async_hook(request_or_response: Request | Response) -> Any:
         # Run the sync hook in a threadpool so it doesn't block. Note that instead of asyncio.to_thread(), we use
         # run_in_executor() with the custom hook_executor configured with larger max workers than the default
         if not should_skip(request_or_response):

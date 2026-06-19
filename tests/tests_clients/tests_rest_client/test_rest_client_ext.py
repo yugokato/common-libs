@@ -8,14 +8,10 @@ import pytest
 from httpx import TransportError
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.ext import (
-    AsyncHTTPClient,
-    BearerAuth,
-    RequestExt,
-    RestResponse,
-    SyncHTTPClient,
-)
-from common_libs.clients.rest_client.utils import RetryPolicy, get_request_from_exception
+from common_libs.clients.rest_client import RetryPolicy
+from common_libs.clients.rest_client.ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
+from common_libs.clients.rest_client.types import Request, RestResponse
+from common_libs.clients.rest_client.utils import get_request_from_exception
 
 
 class TestBearerAuth:
@@ -25,7 +21,7 @@ class TestBearerAuth:
         """Test that auth_flow adds Bearer authorization header to request"""
         token = "my-secret-token"
         auth = BearerAuth(token)
-        request = RequestExt("GET", "http://example.com")
+        request = Request("GET", "http://example.com")
         request.request_id = "req-001"
 
         gen = auth.auth_flow(request)
@@ -43,9 +39,10 @@ class TestBearerAuth:
 class TestRequestExt:
     """Tests for RequestExt class"""
 
-    def test_init_has_extra_attributes(self) -> None:
-        """Test that RequestExt initializes with extra attributes"""
-        request = RequestExt("GET", "http://example.com")
+    def test_build_request_has_extra_attributes(self) -> None:
+        """Test that a built request has extra attributes set by _modify_request"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("GET", "/")
         assert hasattr(request, "retried")
         assert request.retried is None
         assert hasattr(request, "start_time")
@@ -53,17 +50,10 @@ class TestRequestExt:
         assert hasattr(request, "end_time")
         assert request.end_time is None
 
-    def test_init_auto_generates_request_id(self) -> None:
-        """Test that RequestExt generates a request_id immediately on construction"""
-        request = RequestExt("GET", "http://example.com")
-        assert hasattr(request, "request_id")
-        assert isinstance(request.request_id, str)
-        assert len(request.request_id) == 36  # UUID4 canonical form
-
     def test_standard_http_attributes(self) -> None:
         """Test that standard httpx Request attributes are accessible"""
         url = "http://example.com/api"
-        request = RequestExt("POST", url)
+        request = Request("POST", url)
         assert request.method == "POST"
         assert str(request.url) == url
 
@@ -191,7 +181,7 @@ class TestHTTPClientMixin:
         client = SyncHTTPClient(base_url="http://example.com")
         mock_hook = mocker.MagicMock()
 
-        mock_request = mocker.MagicMock(spec=RequestExt)
+        mock_request = mocker.MagicMock(spec=Request)
         mock_request.extensions = {"hooks": {"request": [mock_hook]}}
 
         client.call_request_hooks(mock_request)
@@ -200,7 +190,7 @@ class TestHTTPClientMixin:
     def test_call_request_hooks_no_hooks(self, mocker: MockFixture) -> None:
         """Test that call_request_hooks handles missing hooks gracefully"""
         client = SyncHTTPClient(base_url="http://example.com")
-        mock_request = mocker.MagicMock(spec=RequestExt)
+        mock_request = mocker.MagicMock(spec=Request)
         mock_request.extensions = {}
 
         # Should not raise
@@ -210,7 +200,7 @@ class TestHTTPClientMixin:
         """Test that _build_log_data returns expected log fields"""
         request_id = "log-req-id"
         client = SyncHTTPClient(base_url="http://example.com")
-        request = RequestExt("GET", "http://example.com/api/users")
+        request = Request("GET", "http://example.com/api/users")
         request.request_id = request_id
 
         log_data = client._build_log_data(request)
