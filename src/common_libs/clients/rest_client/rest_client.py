@@ -1,37 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable, Generator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from functools import wraps
-from typing import Any, Concatenate, ParamSpec, Self, TypeVar
+from typing import Any, Self, TypeVar
 from urllib.parse import urlparse
 
 from common_libs.logging import get_logger
 
 from .base import RestClientBase
-from .hooks import get_hooks
+from .hooks import inject_hooks
 from .types import RestResponse, RetryPolicy
 from .utils import DEFAULT_RETRY_POLICY, manage_content_type
 
-P = ParamSpec("P")
-R = TypeVar("R")
 ClientType = TypeVar("ClientType", "RestClient", "AsyncRestClient")
 
 logger = get_logger(__name__)
-
-
-def inject_hooks(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concatenate[ClientType, P], R]:
-    """Inject request/response hooks as extensions option to a request"""
-
-    @wraps(f)
-    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
-        assert isinstance(kwargs, dict)  # for making mypy happy
-        quiet = kwargs.pop("quiet", False)
-        kwargs.setdefault("extensions", {}).update(hooks=get_hooks(self, quiet))
-        return f(self, *args, **kwargs)
-
-    return wrapper
 
 
 class RestClient(RestClientBase):

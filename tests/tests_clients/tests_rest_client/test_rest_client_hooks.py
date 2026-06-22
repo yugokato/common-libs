@@ -6,10 +6,51 @@ from unittest.mock import MagicMock
 
 from pytest_mock import MockFixture
 
-from common_libs.clients.rest_client.hooks import _print_api_summary, get_hooks, request_hooks, response_hooks
+from common_libs.clients.rest_client.hooks import (
+    _print_api_summary,
+    get_hooks,
+    inject_hooks,
+    request_hooks,
+    response_hooks,
+)
 from common_libs.clients.rest_client.rest_client import RestClient
 from common_libs.clients.rest_client.types import Request
 from common_libs.clients.rest_client.utils import TRUNCATE_LEN
+
+
+class TestInjectHooks:
+    """Tests for inject_hooks decorator"""
+
+    def test_inject_hooks_adds_hooks_to_extensions(self) -> None:
+        """Test that inject_hooks adds request and response hooks to kwargs"""
+        injected_kwargs: dict[str, Any] = {}
+
+        @inject_hooks
+        def dummy(self: RestClient, **kwargs: Any) -> dict[str, Any]:
+            injected_kwargs.update(kwargs)
+            return kwargs
+
+        client = RestClient("http://example.com")
+        dummy(client)
+
+        assert "extensions" in injected_kwargs
+        hooks = injected_kwargs["extensions"]["hooks"]
+        assert "request" in hooks
+        assert "response" in hooks
+
+    def test_inject_hooks_pops_quiet_kwarg(self) -> None:
+        """Test that inject_hooks removes 'quiet' from kwargs before passing to function"""
+        received_kwargs: dict[str, Any] = {}
+
+        @inject_hooks
+        def dummy(self: RestClient, **kwargs: Any) -> dict[str, Any]:
+            received_kwargs.update(kwargs)
+            return kwargs
+
+        client = RestClient("http://example.com")
+        dummy(client, quiet=True)
+
+        assert "quiet" not in received_kwargs
 
 
 class TestGetHooks:

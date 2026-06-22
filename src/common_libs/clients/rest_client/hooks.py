@@ -5,7 +5,8 @@ import json
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from functools import wraps
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 
 from httpx import Request, Response
 
@@ -25,9 +26,24 @@ if TYPE_CHECKING:
     from .rest_client import ClientType
     from .types import JSONType, Request, Response
 
+P = ParamSpec("P")
+R = TypeVar("R")
 
 logger = get_logger(__name__)
 _hook_executor = ThreadPoolExecutor(max_workers=32)
+
+
+def inject_hooks(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concatenate[ClientType, P], R]:
+    """Inject request/response hooks as extensions option to a request"""
+
+    @wraps(f)
+    def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
+        assert isinstance(kwargs, dict)  # for making mypy happy
+        quiet = kwargs.pop("quiet", False)
+        kwargs.setdefault("extensions", {}).update(hooks=get_hooks(self, quiet))
+        return f(self, *args, **kwargs)
+
+    return wrapper
 
 
 def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
