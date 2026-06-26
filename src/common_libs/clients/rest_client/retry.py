@@ -92,8 +92,8 @@ class BackoffStrategy:
 class RetryPolicy:
     """Policy controlling automatic HTTP request retry behavior.
 
-    Pass an instance to `RestClient` or `AsyncRestClient` via the `retry` parameter.
-    Use `retry=None` to disable automatic retries entirely.
+    Pass an instance to `RestClient` or `AsyncRestClient` via the `retry_policy` parameter.
+    Use `retry_policy=None` to disable automatic retries entirely.
 
     :param condition: Status code(s), exception class(es), or a callable matching the retry trigger.
                       Accepts the same forms as `retry_on`.

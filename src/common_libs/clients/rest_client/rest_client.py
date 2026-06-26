@@ -28,7 +28,7 @@ class RestClient(RestClientBase):
         *,
         log_headers: bool = False,
         prettify_response_log: bool = True,
-        retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
         **kwargs: Any,
     ) -> None:
         try:
@@ -40,7 +40,11 @@ class RestClient(RestClientBase):
                 f"{RestClient.__name__} cannot be used inside async context. Use {AsyncRestClient.__name__} instead."
             )
         super().__init__(
-            base_url, log_headers=log_headers, prettify_response_log=prettify_response_log, retry=retry, **kwargs
+            base_url,
+            log_headers=log_headers,
+            prettify_response_log=prettify_response_log,
+            retry_policy=retry_policy,
+            **kwargs,
         )
 
     def __enter__(self) -> Self:
@@ -149,7 +153,7 @@ class AsyncRestClient(RestClientBase):
         *,
         log_headers: bool = False,
         prettify_response_log: bool = True,
-        retry: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -157,7 +161,7 @@ class AsyncRestClient(RestClientBase):
             log_headers=log_headers,
             prettify_response_log=prettify_response_log,
             async_mode=True,
-            retry=retry,
+            retry_policy=retry_policy,
             **kwargs,
         )
 

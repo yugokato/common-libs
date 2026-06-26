@@ -229,8 +229,8 @@ class TestSyncHTTPClient:
     def test_retry_none_disables_503_retry(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that retry=None disables the default 503 retry so the response is returned immediately"""
-        client = SyncHTTPClient(base_url="http://example.com", retry=None)
+        """Test that retry_policy=None disables the default 503 retry so the response is returned immediately"""
+        client = SyncHTTPClient(base_url="http://example.com", retry_policy=None)
         mock_503 = mock_response_factory(503)
         send_mock = mocker.patch.object(client, "_send", return_value=mock_503)
         mocker.patch("common_libs.clients.rest_client.ext.logger")
@@ -245,7 +245,7 @@ class TestSyncHTTPClient:
     ) -> None:
         """Test that a custom RetryPolicy with a different status code retries on that code"""
         mocker.patch("time.sleep")
-        client = SyncHTTPClient(base_url="http://example.com", retry=RetryPolicy(condition=429, retry_after=0))
+        client = SyncHTTPClient(base_url="http://example.com", retry_policy=RetryPolicy(condition=429, retry_after=0))
         mock_429 = mock_response_factory(429)
         mock_ok = mock_response_factory(200)
         call_count = 0
@@ -271,7 +271,7 @@ class TestSyncHTTPClient:
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False)
         client = SyncHTTPClient(
             base_url="http://example.com",
-            retry=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
+            retry_policy=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
         )
         mock_503 = mock_response_factory(503)
         mock_ok = mock_response_factory(200)
@@ -300,7 +300,7 @@ class TestSyncHTTPClient:
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         client = SyncHTTPClient(
             base_url="http://example.com",
-            retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
+            retry_policy=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
         )
         mock_503 = mock_response_factory(503)
         mock_503.headers = {"Retry-After": "20"}
@@ -339,8 +339,8 @@ class TestAsyncHTTPClient:
     async def test_retry_none_disables_503_retry(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that retry=None disables the default 503 retry so the response is returned immediately"""
-        async with AsyncHTTPClient(base_url="http://example.com", retry=None) as client:
+        """Test that retry_policy=None disables the default 503 retry so the response is returned immediately"""
+        async with AsyncHTTPClient(base_url="http://example.com", retry_policy=None) as client:
             mock_503 = mock_response_factory(503)
             send_mock = mocker.patch.object(client, "_send", new_callable=AsyncMock, return_value=mock_503)
             mocker.patch("common_libs.clients.rest_client.ext.logger")
@@ -358,7 +358,7 @@ class TestAsyncHTTPClient:
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False)
         async with AsyncHTTPClient(
             base_url="http://example.com",
-            retry=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
+            retry_policy=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
         ) as client:
             mock_503 = mock_response_factory(503)
             mock_ok = mock_response_factory(200)
@@ -389,7 +389,7 @@ class TestAsyncHTTPClient:
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         async with AsyncHTTPClient(
             base_url="http://example.com",
-            retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
+            retry_policy=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
         ) as client:
             mock_503 = mock_response_factory(503)
             mock_503.headers = {"Retry-After": "20"}

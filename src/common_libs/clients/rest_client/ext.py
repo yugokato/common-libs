@@ -34,21 +34,21 @@ class HTTPClientMixin:
 
     _request_id_header = "X-Request-ID"
 
-    def __init__(self, *args: Any, retry: RetryPolicy | None = DEFAULT_RETRY_POLICY, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY, **kwargs: Any) -> None:
         """Initialize the mixin and build the retry decorator from the given policy.
 
-        :param retry: Retry policy controlling automatic retry behavior, or `None` to disable retries.
+        :param retry_policy: Retry policy controlling automatic retry behavior, or `None` to disable retries.
         :param args: Positional arguments forwarded to the underlying httpx client.
         :param kwargs: Keyword arguments forwarded to the underlying httpx client.
         """
         self._retry_decorator: Any = (
             retry_on(
-                retry.condition,
-                num_retries=retry.num_retries,
-                retry_after=retry.retry_after,
-                safe_methods_only=retry.safe_methods_only,
+                retry_policy.condition,
+                num_retries=retry_policy.num_retries,
+                retry_after=retry_policy.retry_after,
+                safe_methods_only=retry_policy.safe_methods_only,
             )
-            if retry is not None
+            if retry_policy is not None
             else None
         )
         super().__init__(*args, **kwargs)
