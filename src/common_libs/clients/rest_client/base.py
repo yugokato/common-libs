@@ -7,8 +7,7 @@ from httpx._types import TimeoutTypes
 from common_libs.logging import get_logger
 
 from .ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
-from .types import RetryPolicy
-from .utils import DEFAULT_RETRY_POLICY
+from .retry import DEFAULT_RETRY_POLICY, RetryPolicy
 
 logger = get_logger(__name__)
 
@@ -35,7 +34,7 @@ class RestClientBase:
         :param async_mode: Use async mode
         :param timeout: The client-level timeout settings. This can be overridden in each request
         :param retry: Retry policy for automatic request retries, or `None` to disable.
-                      Defaults to retrying once on HTTP 503 after 15 s for safe methods only.
+                      Defaults to retrying once on HTTP 503 after 5 s for safe methods only.
         :param kwargs: Any other parameters to pass to the httpx client
         """
         self.log_headers = log_headers

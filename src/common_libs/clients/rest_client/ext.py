@@ -13,14 +13,9 @@ from httpx._auth import Auth
 
 from common_libs.logging import get_logger
 
-from .types import Request, Response, RetryPolicy
-from .utils import (
-    DEFAULT_RETRY_POLICY,
-    SAFE_HTTP_METHODS,
-    is_connection_reset,
-    retry_on,
-    set_request_to_exception,
-)
+from .retry import DEFAULT_RETRY_POLICY, RetryPolicy, retry_on
+from .types import Request, Response
+from .utils import SAFE_HTTP_METHODS, is_connection_reset, set_request_to_exception
 
 logger = get_logger(__name__)
 

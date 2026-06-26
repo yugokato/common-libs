@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -10,7 +10,6 @@ from httpx import Request as _Request
 from httpx import Response as _Response
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
-RetryCondition: TypeAlias = int | type[Exception] | Sequence[int | type[Exception]] | Callable[..., bool]
 
 
 class Request(_Request):
@@ -114,25 +113,3 @@ class RestResponse:
         from .utils import process_response
 
         return process_response(response)
-
-
-@dataclass(frozen=True)
-class RetryPolicy:
-    """Policy controlling automatic HTTP request retry behavior.
-
-    Pass an instance to `RestClient` or `AsyncRestClient` via the `retry` parameter.
-    Use `retry=None` to disable automatic retries entirely.
-
-    :param condition: Status code(s), exception class(es), or a callable matching the retry trigger.
-                      Accepts the same forms as `retry_on`.
-    :param num_retries: Maximum number of retry attempts.
-    :param retry_after: Seconds to wait before retrying, or a callable that receives the response or
-                        exception and returns the wait time.
-    :param safe_methods_only: When `True`, only retries requests with safe HTTP methods
-                              (GET, HEAD, OPTIONS).
-    """
-
-    condition: RetryCondition = 503
-    num_retries: int = 1
-    retry_after: float | int | Callable[..., float | int] = 15
-    safe_methods_only: bool = True

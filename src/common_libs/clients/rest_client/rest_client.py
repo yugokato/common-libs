@@ -10,8 +10,9 @@ from common_libs.logging import get_logger
 
 from .base import RestClientBase
 from .hooks import inject_hooks
-from .types import RestResponse, RetryPolicy
-from .utils import DEFAULT_RETRY_POLICY, manage_content_type
+from .retry import DEFAULT_RETRY_POLICY, RetryPolicy
+from .types import RestResponse
+from .utils import manage_content_type
 
 ClientType = TypeVar("ClientType", "RestClient", "AsyncRestClient")
 

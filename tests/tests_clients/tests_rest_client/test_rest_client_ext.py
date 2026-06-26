@@ -10,6 +10,7 @@ from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import RetryPolicy
 from common_libs.clients.rest_client.ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
+from common_libs.clients.rest_client.retry import BackoffStrategy
 from common_libs.clients.rest_client.types import Request, RestResponse
 from common_libs.clients.rest_client.utils import get_request_from_exception
 
@@ -262,6 +263,63 @@ class TestSyncHTTPClient:
         assert result is mock_ok
         assert call_count == 2
 
+    def test_retry_policy_with_backoff_strategy_uses_exponential_delays(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that a RetryPolicy with a BackoffStrategy produces correct exponential sleep delays"""
+        sleep_mock = mocker.patch("time.sleep")
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False)
+        client = SyncHTTPClient(
+            base_url="http://example.com",
+            retry=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
+        )
+        mock_503 = mock_response_factory(503)
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        def _send_side_effect(request: MagicMock, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return mock_ok if call_count == 3 else mock_503
+
+        mocker.patch.object(client, "_send", side_effect=_send_side_effect)
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        result = client.send(client.build_request("GET", "/"))
+
+        assert result is mock_ok
+        assert sleep_mock.call_count == 2
+        assert sleep_mock.call_args_list[0][0][0] == pytest.approx(1.0)  # attempt 0
+        assert sleep_mock.call_args_list[1][0][0] == pytest.approx(2.0)  # attempt 1
+
+    def test_retry_policy_with_backoff_strategy_respects_retry_after_header(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that a RetryPolicy with BackoffStrategy(respect_retry_after=True) honors the Retry-After header"""
+        sleep_mock = mocker.patch("time.sleep")
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        client = SyncHTTPClient(
+            base_url="http://example.com",
+            retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
+        )
+        mock_503 = mock_response_factory(503)
+        mock_503.headers = {"Retry-After": "20"}
+        mock_ok = mock_response_factory(200)
+        call_count = 0
+
+        def _send_side_effect(request: MagicMock, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return mock_ok if call_count == 2 else mock_503
+
+        mocker.patch.object(client, "_send", side_effect=_send_side_effect)
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        result = client.send(client.build_request("GET", "/"))
+
+        assert result is mock_ok
+        sleep_mock.assert_called_once_with(pytest.approx(20.0))
+
 
 class TestAsyncHTTPClient:
     """Tests for AsyncHTTPClient.send()"""
@@ -291,6 +349,65 @@ class TestAsyncHTTPClient:
 
         assert result is mock_503
         assert send_mock.call_count == 1
+
+    async def test_retry_policy_with_backoff_strategy_uses_exponential_delays(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that an async RetryPolicy with a BackoffStrategy produces correct exponential sleep delays"""
+        sleep_mock = mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False)
+        async with AsyncHTTPClient(
+            base_url="http://example.com",
+            retry=RetryPolicy(condition=503, num_retries=2, retry_after=strategy, safe_methods_only=False),
+        ) as client:
+            mock_503 = mock_response_factory(503)
+            mock_ok = mock_response_factory(200)
+            call_count = 0
+
+            def _send_side_effect(request: MagicMock, **kwargs: object) -> MagicMock:
+                nonlocal call_count
+                call_count += 1
+                return mock_ok if call_count == 3 else mock_503
+
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, side_effect=_send_side_effect)
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            result = await client.send(client.build_request("GET", "/"))
+
+        assert result is mock_ok
+        assert sleep_mock.call_count == 2
+        assert sleep_mock.call_args_list[0][0][0] == pytest.approx(1.0)  # attempt 0
+        assert sleep_mock.call_args_list[1][0][0] == pytest.approx(2.0)  # attempt 1
+
+    async def test_retry_policy_with_backoff_strategy_respects_retry_after_header(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """
+        Test that an async RetryPolicy with BackoffStrategy(respect_retry_after=True) honors the Retry-After header
+        """
+        sleep_mock = mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        async with AsyncHTTPClient(
+            base_url="http://example.com",
+            retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
+        ) as client:
+            mock_503 = mock_response_factory(503)
+            mock_503.headers = {"Retry-After": "20"}
+            mock_ok = mock_response_factory(200)
+            call_count = 0
+
+            def _send_side_effect(request: MagicMock, **kwargs: object) -> MagicMock:
+                nonlocal call_count
+                call_count += 1
+                return mock_ok if call_count == 2 else mock_503
+
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, side_effect=_send_side_effect)
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            result = await client.send(client.build_request("GET", "/"))
+
+        assert result is mock_ok
+        sleep_mock.assert_called_once_with(pytest.approx(20.0))
 
 
 class TestConnectionResetReconnect:
