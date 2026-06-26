@@ -38,10 +38,10 @@ class BackoffStrategy:
     :param base: Base wait time in seconds for the first retry
     :param factor: Multiplicative growth factor per attempt
     :param max_delay: Upper bound on the computed exponential wait time in seconds.
-                      This cap does not apply when `respect_retry_after=True` and the response
+                      This cap does not apply when `honor_retry_after=True` and the response
                       carries a `Retry-After` header — the server's explicit value is used verbatim.
     :param jitter: When `True`, applies full jitter: actual delay is `uniform(0, computed)`
-    :param respect_retry_after: When `True` and the response carries a `Retry-After` header, use that value instead of
+    :param honor_retry_after: When `True` and the response carries a `Retry-After` header, use that value instead of
                                 the exponential formula. The header value is honored verbatim — it is neither jittered
                                 nor capped by `max_delay`.
     """
@@ -50,7 +50,7 @@ class BackoffStrategy:
     factor: float = 2.0
     max_delay: float = 60.0
     jitter: bool = True
-    respect_retry_after: bool = False
+    honor_retry_after: bool = False
 
     def __post_init__(self) -> None:
         if self.base < 0 or self.factor < 0 or self.max_delay < 0:
@@ -62,7 +62,7 @@ class BackoffStrategy:
         :param attempt: Zero-based retry attempt index
         :param context: The response or exception that triggered the retry
         """
-        if self.respect_retry_after and not isinstance(context, Exception):
+        if self.honor_retry_after and not isinstance(context, Exception):
             headers = context._response.headers if isinstance(context, RestResponse) else context.headers
             parsed = _parse_retry_after(headers.get("Retry-After"))
             if parsed is not None:

@@ -81,21 +81,21 @@ class TestBackoffStrategy:
 
     def test_delay_falls_back_to_exponential_on_exception(self) -> None:
         """Test that BackoffStrategy.delay falls back to exponential formula when context is an Exception"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         result = strategy.delay(0, ConnectionError("timeout"))
         assert result == pytest.approx(1.0)
 
-    def test_delay_uses_retry_after_header_when_respect_retry_after_enabled(self, mocker: MockFixture) -> None:
-        """Test that delay uses the Retry-After header value when respect_retry_after=True"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+    def test_delay_uses_retry_after_header_when_honor_retry_after_enabled(self, mocker: MockFixture) -> None:
+        """Test that delay uses the Retry-After header value when honor_retry_after=True"""
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_httpx_response = mocker.MagicMock()
         mock_httpx_response.headers.get.return_value = "30"
         response = RestResponse(mock_httpx_response)
         assert strategy.delay(0, response) == pytest.approx(30.0)
 
-    def test_delay_ignores_retry_after_header_when_respect_retry_after_disabled(self, mocker: MockFixture) -> None:
-        """Test that delay ignores the Retry-After header when respect_retry_after=False"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=False)
+    def test_delay_ignores_retry_after_header_when_honor_retry_after_disabled(self, mocker: MockFixture) -> None:
+        """Test that delay ignores the Retry-After header when honor_retry_after=False"""
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=False)
         mock_httpx_response = mocker.MagicMock()
         mock_httpx_response.headers.get.return_value = "999"
         response = RestResponse(mock_httpx_response)
@@ -130,43 +130,43 @@ class TestBackoffStrategyJitterAndFallback:
             result = strategy.delay(attempt, ctx)
             assert 0.0 <= result <= computed
 
-    def test_respect_retry_after_falls_back_to_exponential_when_header_missing(self, mocker: MockFixture) -> None:
+    def test_honor_retry_after_falls_back_to_exponential_when_header_missing(self, mocker: MockFixture) -> None:
         """Test that delay falls back to the exponential formula when the Retry-After header is absent"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_httpx_response = mocker.MagicMock()
         mock_httpx_response.headers.get.return_value = None
         response = RestResponse(mock_httpx_response)
         assert strategy.delay(0, response) == pytest.approx(1.0)
 
-    def test_respect_retry_after_falls_back_to_exponential_when_header_unparseable(self, mocker: MockFixture) -> None:
+    def test_honor_retry_after_falls_back_to_exponential_when_header_unparseable(self, mocker: MockFixture) -> None:
         """Test that delay falls back to the exponential formula when the Retry-After header is unparseable"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_httpx_response = mocker.MagicMock()
         mock_httpx_response.headers.get.return_value = "not-a-valid-value"
         response = RestResponse(mock_httpx_response)
         assert strategy.delay(0, response) == pytest.approx(1.0)
 
-    def test_respect_retry_after_reads_header_from_raw_httpx_response(self) -> None:
+    def test_honor_retry_after_reads_header_from_raw_httpx_response(self) -> None:
         """Test that delay reads Retry-After from a raw httpx Response (the production path through ext.py)"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         raw = httpx.Response(503, headers={"Retry-After": "45"}, request=httpx.Request("GET", "http://x"))
         assert strategy.delay(0, raw) == pytest.approx(45.0)
 
     def test_retry_after_header_not_capped_by_max_delay(self, mocker: MockFixture) -> None:
         """Test that a Retry-After header value exceeding max_delay is honored verbatim, not capped"""
-        strategy = BackoffStrategy(base=1.0, factor=2.0, max_delay=30.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, max_delay=30.0, jitter=False, honor_retry_after=True)
         mock_httpx_response = mocker.MagicMock()
         mock_httpx_response.headers.get.return_value = "999"
         response = RestResponse(mock_httpx_response)
         assert strategy.delay(0, response) == pytest.approx(999.0)
 
-    def test_respect_retry_after_via_retry_on_with_raw_response_factory(
+    def test_honor_retry_after_via_retry_on_with_raw_response_factory(
         self, mocker: MockFixture, mock_response_factory: Callable[..., MagicMock]
     ) -> None:
         """Test that retry_on honors the `Retry-After` header end-to-end when `retry_after` is a
         `BackoffStrategy` and the wrapped function returns a raw httpx `Response`."""
         sleep_mock = mocker.patch("time.sleep")
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_err = mock_response_factory(503)
         mock_err.headers = {"Retry-After": "30"}
         mock_ok = mock_response_factory(200)
@@ -1095,7 +1095,7 @@ class TestRetryOnBackoff:
         """Test that the backoff attempt counter increments even when Retry-After was used, so the
         next attempt without the header falls back to the correct exponential position."""
         sleep_mock = mocker.patch("time.sleep")
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_503_with_header = mock_response_factory(503)
         mock_503_with_header.headers = {"Retry-After": "10"}
         mock_503_no_header = mock_response_factory(503)

@@ -295,9 +295,9 @@ class TestSyncHTTPClient:
     def test_retry_policy_with_backoff_strategy_respects_retry_after_header(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that a RetryPolicy with BackoffStrategy(respect_retry_after=True) honors the Retry-After header"""
+        """Test that a RetryPolicy with BackoffStrategy(honor_retry_after=True) honors the Retry-After header"""
         sleep_mock = mocker.patch("time.sleep")
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         client = SyncHTTPClient(
             base_url="http://example.com",
             retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
@@ -383,10 +383,10 @@ class TestAsyncHTTPClient:
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
         """
-        Test that an async RetryPolicy with BackoffStrategy(respect_retry_after=True) honors the Retry-After header
+        Test that an async RetryPolicy with BackoffStrategy(honor_retry_after=True) honors the Retry-After header
         """
         sleep_mock = mocker.patch("asyncio.sleep", new_callable=AsyncMock)
-        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, respect_retry_after=True)
+        strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         async with AsyncHTTPClient(
             base_url="http://example.com",
             retry=RetryPolicy(condition=503, num_retries=1, retry_after=strategy, safe_methods_only=False),
