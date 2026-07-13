@@ -207,6 +207,8 @@ class TestPayloadTruncation:
 
     def test_large_json_payload_is_truncated_in_summary(self, mocker: MockFixture) -> None:
         """Test that a large JSON payload is truncated in the console summary"""
+        mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=True)
+
         large_value = "v" * (TRUNCATE_LEN * 2)
         body = f'{{"key": "{large_value}"}}'.encode()
         mock_request = self._make_request(mocker, body)
@@ -236,6 +238,8 @@ class TestPayloadTruncation:
 
     def test_small_payload_not_truncated_in_summary(self, mocker: MockFixture) -> None:
         """Test that a small payload passes through the summary unchanged"""
+        mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=True)
+
         body = b'{"key": "short"}'
         mock_request = self._make_request(mocker, body)
 
@@ -261,3 +265,69 @@ class TestPayloadTruncation:
         output = "".join(written)
         assert "TRUNCATED" not in output
         assert "short" in output
+
+
+class TestApiSummaryOptIn:
+    """Tests that the console API summary is gated behind the logging opt-in"""
+
+    def test_summary_silent_on_success_when_info_not_enabled(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that no summary is printed for a successful response when INFO logging is not enabled"""
+        mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=False)
+
+        mock_response = mock_response_factory(200)
+        mock_response.request.read.return_value = b""
+        mock_client = mocker.MagicMock()
+        mock_client.log_headers = False
+        mock_client.prettify_response_log = False
+
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp="ok body")
+
+        assert written == []
+
+    def test_summary_silent_on_error_when_info_not_enabled(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that no summary is printed for an error response when INFO logging is not enabled, even if quiet"""
+        mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=False)
+
+        mock_response = mock_response_factory(500)
+        mock_response.request.read.return_value = b""
+        mock_client = mocker.MagicMock()
+        mock_client.log_headers = False
+        mock_client.prettify_response_log = False
+
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        _print_api_summary(mock_response, quiet=True, rest_client=mock_client, processed_resp="error body")
+
+        assert written == []
+
+    def test_summary_printed_when_info_enabled(
+        self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that the summary is printed as usual once INFO logging is enabled"""
+        mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=True)
+
+        mock_response = mock_response_factory(200)
+        mock_response.request.read.return_value = b""
+        mock_client = mocker.MagicMock()
+        mock_client.log_headers = False
+        mock_client.prettify_response_log = False
+
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp="ok body")
+
+        output = "".join(written)
+        assert "status_code" in output
+        assert "ok body" in output

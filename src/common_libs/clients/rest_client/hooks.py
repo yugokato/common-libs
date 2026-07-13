@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -119,6 +120,12 @@ def _log_response(response: Response, quiet: bool, rest_client: ClientType, proc
 
 def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Print API request/response summary to the console"""
+    # The console summary is a human-facing view of INFO-level request/response activity. Render it only when a
+    # downstream has opted into logging (`setup_logging` raises the `common_libs` logger to INFO). By default the
+    # logger sits at WARNING with a `NullHandler`, so nothing is printed.
+    if not logger.isEnabledFor(logging.INFO):
+        return
+
     log_headers = rest_client.log_headers
     request: Request = response.request
     if quiet:
