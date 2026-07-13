@@ -72,6 +72,9 @@ all = ["common-libs[client,http3,container]"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+common_libs = ["py.typed", "cfg/*"]
+
 [tool.ruff]
 line-length = 120
 indent-width = 4

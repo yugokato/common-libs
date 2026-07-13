@@ -1,12 +1,12 @@
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
+from logging import NullHandler, getLogger
 
 try:
     __version__ = version("common-libs")
 except PackageNotFoundError:
-    pass
+    __version__ = "unknown"
 
 
-from .logging import setup_logging
-
-setup_logging(Path(__file__).parent.parent / "cfg" / "logging.yaml")
+# Downstream projects can opt in logging by calling `common_libs.logging.setup_logging()` explicitly. Until then,
+# attach a NullHandler so `common_libs` loggers never trigger the "No handlers could be found" warning.
+getLogger(__name__).addHandler(NullHandler())
