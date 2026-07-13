@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from enum import StrEnum, auto
 from importlib import resources
-from logging import LogRecord, config
-from pathlib import Path
+from logging import LogRecord
+from logging.config import dictConfig
 from typing import Any
 
 import yaml
@@ -15,36 +15,38 @@ import yaml
 from common_libs.ansi_colors import ColorCodes, color
 
 
-def setup_logging(config_path: str | Path | None = None, delta_config_path: str | Path | None = None) -> None:
+def setup_logging(config: Mapping[str, Any] | None = None, delta_config: Mapping[str, Any] | None = None) -> None:
     """Setup logging
 
     Calling this is optional. Until it is called, `common_libs` loggers are silent (a `NullHandler` is attached
     at import time), so downstream projects that never call this function won't see any output or warnings.
 
-    When `config_path` is not specified, the package's built-in config is applied. That default only configures
+    When `config` is not specified, the package's built-in config is applied. That default only configures
     the `common_libs` logger itself (colored console output, `propagate: false`), and leaves the root logger and
     any other loggers untouched. This means a downstream app's own handlers (eg. a file or JSON handler on the
     root logger) will NOT automatically capture `common_libs` logs. Projects that want unified logging should
-    either pass their own `config_path`, or use `delta_config_path` to layer overrides (eg. `propagate: true`,
+    either pass their own `config`, or use `delta_config` to layer overrides (eg. `propagate: true`,
     a different level) onto the default config.
 
-    :param config_path: File path to a base logging config (.yaml). Defaults to the package's built-in config when
-                        not specified
-    :param delta_config_path: File path to a delta logging config (.yaml) to merge onto the base config
+    :param config: Base logging config, following the `logging.config.dictConfig` schema. Defaults to the
+                    package's built-in config when not specified
+    :param delta_config: Delta logging config to merge onto the base config
     """
-    if config_path is not None:
-        log_cfg = _load_yaml(config_path)
+    if config is not None:
+        _validate_config(config, "config")
+        log_cfg = dict(config)
     else:
-        with resources.as_file(resources.files("common_libs") / "cfg" / "logging.yaml") as default_config_path:
-            log_cfg = _load_yaml(default_config_path)
+        config_text = (resources.files("common_libs") / "cfg" / "logging.yaml").read_text(encoding="utf-8")
+        log_cfg = yaml.safe_load(config_text)
 
-    if delta_config_path:
-        from common_libs.utils import merge_dicts
+    if delta_config is not None:
+        _validate_config(delta_config, "delta_config")
+        if delta_config:
+            from common_libs.utils import merge_dicts
 
-        delta_log_cfg = _load_yaml(delta_config_path)
-        log_cfg = merge_dicts(log_cfg, delta_log_cfg)
+            log_cfg = merge_dicts(log_cfg, dict(delta_config))
 
-    config.dictConfig(log_cfg)
+    dictConfig(log_cfg)
 
 
 def get_logger(name: str) -> LoggerAdapter:
@@ -174,10 +176,11 @@ class ColoredStreamHandler(logging.StreamHandler):  # type: ignore[type-arg]
             return ColorCodes.DEFAULT
 
 
-def _load_yaml(path: str | Path) -> Any:
-    """Load and parse a YAML file
+def _validate_config(config: Any, name: str) -> None:
+    """Validate that a logging config argument is a `Mapping`
 
-    :param path: File path to the YAML file
+    :param config: The value to validate
+    :param name: The parameter name to reference in the error message
     """
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    if not isinstance(config, Mapping):
+        raise TypeError(f"`{name}` must be a Mapping, not {type(config).__name__}")

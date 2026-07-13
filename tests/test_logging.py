@@ -6,8 +6,7 @@ import re
 import sys
 import time
 from collections.abc import Iterator
-from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 import pytest
 
@@ -41,15 +40,15 @@ def _restore_logging_state() -> Iterator[None]:
 class TestSetupLogging:
     """Tests for setup_logging function"""
 
-    def test_setup_logging_basic(self, logging_config_file: Path) -> None:
+    def test_setup_logging_basic(self, logging_config: dict[str, Any]) -> None:
         """Test basic logging setup"""
-        setup_logging(logging_config_file)
+        setup_logging(logging_config)
         logger = logging.getLogger(__name__)
         assert logger.level == logging.DEBUG
 
-    def test_setup_logging_with_delta(self, logging_config_file: Path, delta_config_file: Path) -> None:
+    def test_setup_logging_with_delta(self, logging_config: dict[str, Any], delta_config: dict[str, Any]) -> None:
         """Test logging setup with delta config"""
-        setup_logging(logging_config_file, delta_config_file)
+        setup_logging(logging_config, delta_config)
         logger = logging.getLogger(__name__)
         assert logger.level == logging.INFO
 
@@ -60,6 +59,16 @@ class TestSetupLogging:
         assert logger.level == logging.INFO
         assert logger.propagate is False
         assert any(isinstance(handler, ColoredStreamHandler) for handler in logger.handlers)
+
+    def test_setup_logging_invalid_config_type(self) -> None:
+        """Test that setup_logging raises TypeError when config is not a Mapping"""
+        with pytest.raises(TypeError, match="`config` must be a Mapping, not list"):
+            setup_logging(["not", "a", "mapping"])
+
+    def test_setup_logging_invalid_delta_config_type(self, logging_config: dict[str, Any]) -> None:
+        """Test that setup_logging raises TypeError when delta_config is not a Mapping"""
+        with pytest.raises(TypeError, match="`delta_config` must be a Mapping, not str"):
+            setup_logging(logging_config, "not a mapping")
 
 
 class TestGetLogger:

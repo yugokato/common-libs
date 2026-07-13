@@ -1,9 +1,9 @@
 """Shared pytest fixtures and configuration"""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
-import yaml
 
 
 @pytest.fixture
@@ -21,9 +21,9 @@ def temp_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def logging_config_file(tmp_path: Path) -> Path:
-    """Create a temporary logging config file"""
-    config = {
+def logging_config() -> dict[str, Any]:
+    """Create a logging config dict"""
+    return {
         "version": 1,
         "disable_existing_loggers": False,
         "handlers": {
@@ -36,17 +36,9 @@ def logging_config_file(tmp_path: Path) -> Path:
             "tests.test_logging": {"level": "DEBUG", "handlers": ["console"]},
         },
     }
-    config_path = tmp_path / "logging.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(config, f)
-    return config_path
 
 
 @pytest.fixture
-def delta_config_file(tmp_path: Path) -> Path:
-    """Create a temporary delta logging config file"""
-    config = {"loggers": {"tests.test_logging": {"level": "INFO"}}}
-    config_path = tmp_path / "logging_delta.yaml"
-    with open(config_path, "w") as f:
-        yaml.dump(config, f)
-    return config_path
+def delta_config() -> dict[str, Any]:
+    """Create a delta logging config dict"""
+    return {"loggers": {"tests.test_logging": {"level": "INFO"}}}
