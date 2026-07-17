@@ -5,6 +5,7 @@ import time
 
 import httpx
 import pytest
+from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import AsyncRestClient, RateLimit, RestClient
 from common_libs.clients.rest_client.rate_limit import RateLimiter
@@ -90,13 +91,17 @@ class TestRateLimiter:
         wait_secs = limiter.try_acquire()
         assert 0 < wait_secs <= 50
 
-    def test_tokens_refill_over_time(self) -> None:
+    def test_tokens_refill_over_time(self, mocker: MockFixture) -> None:
         """Test that tokens refill according to the configured rate"""
-        limiter = RateLimiter(RateLimit(100, interval=0.1))
-        for _ in range(100):
-            assert limiter.try_acquire() == 0.0
+        clock = {"now": 0.0}
+        mocker.patch("time.monotonic", lambda: clock["now"])
+
+        limiter = RateLimiter(RateLimit(2, interval=0.2))
+        assert limiter.try_acquire() == 0.0
+        assert limiter.try_acquire() == 0.0
         assert limiter.try_acquire() > 0
-        time.sleep(0.05)
+
+        clock["now"] += 0.15
         assert limiter.try_acquire() == 0.0
 
 

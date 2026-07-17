@@ -59,33 +59,31 @@ class TestLock:
     def test_lock_different_names_no_conflict(self) -> None:
         """Test that locks with different names don't conflict (allow concurrent execution)"""
 
-        execution_times: list[float] = []
+        intervals: dict[str, tuple[float, float]] = {}
         lock_hold_time = 0.1
 
         def acquire_lock(name: str) -> None:
-            start = time.time()
             with Lock(name):
+                start = time.time()
                 time.sleep(lock_hold_time)
-            execution_times.append(time.time() - start)
+                intervals[name] = (start, time.time())
 
         # Use different lock names - should allow concurrent execution
-        t1 = threading.Thread(target=acquire_lock, args=(f"lock_a_{uuid.uuid4()}",))
-        t2 = threading.Thread(target=acquire_lock, args=(f"lock_b_{uuid.uuid4()}",))
-
-        overall_start = time.time()
+        name_a, name_b = f"lock_a_{uuid.uuid4()}", f"lock_b_{uuid.uuid4()}"
+        t1 = threading.Thread(target=acquire_lock, args=(name_a,))
+        t2 = threading.Thread(target=acquire_lock, args=(name_b,))
         t1.start()
         t2.start()
         t1.join()
         t2.join()
-        overall_duration = time.time() - overall_start
 
-        # If locks don't conflict, they run concurrently: total time ≈ lock_hold_time
-        # If they conflicted (same lock), they'd serialize: total time ≈ 2 * lock_hold_time
-        # Allow some overhead for thread scheduling (use 1.5x as threshold)
-        assert overall_duration < lock_hold_time * 1.5, (
-            f"Locks with different names should allow concurrent execution. "
-            f"Expected ~{lock_hold_time}s, got {overall_duration:.2f}s"
-        )
+        # If locks don't conflict, the two hold intervals overlap in time. If they conflicted
+        # (same lock), the intervals would be disjoint. Checking overlap rather than total
+        # duration keeps this robust when the system is generally slow (e.g. under parallel
+        # test execution), since overall slowness stretches both intervals together.
+        (start_a, end_a), (start_b, end_b) = intervals[name_a], intervals[name_b]
+        overlap = min(end_a, end_b) - max(start_a, start_b)
+        assert overlap > 0, f"Locks with different names should allow concurrent execution (no overlap: {intervals})"
 
     def test_lock_default_name(self) -> None:
         """Test lock with default name"""
@@ -175,12 +173,12 @@ class TestAsyncLock:
     async def test_async_lock_does_not_block_event_loop(self) -> None:
         """Test that waiting to acquire an async lock does not block the event loop"""
         lock_name = f"test_async_nonblocking_{uuid.uuid4()}"
-        ticks = 0
+        tick_times: list[float] = []
+        wait_window: list[float] = []
 
         async def heartbeat() -> None:
-            nonlocal ticks
             while True:
-                ticks += 1
+                tick_times.append(time.time())
                 await asyncio.sleep(0.01)
 
         async def holder() -> None:
@@ -189,8 +187,9 @@ class TestAsyncLock:
 
         async def waiter() -> None:
             await asyncio.sleep(0.02)  # Ensure holder grabs lock first
+            wait_window.append(time.time())
             async with AsyncLock(lock_name):
-                pass
+                wait_window.append(time.time())
 
         hb_task = asyncio.create_task(heartbeat())
         try:
@@ -198,32 +197,33 @@ class TestAsyncLock:
         finally:
             hb_task.cancel()
 
-        # If the loop was blocked during contention, the heartbeat would barely tick.
-        # With asyncio.sleep-based polling, it should tick many times.
-        assert ticks > 10, f"Event loop appeared to be blocked (ticks={ticks})"
+        # If the loop was blocked while the waiter contended for the lock, no heartbeat tick
+        # could land inside that window. Checking for a tick within the window (rather than a
+        # total tick count against a fixed duration) keeps this robust when the whole process
+        # is scheduled slowly under system load.
+        wait_start, wait_end = wait_window
+        ticks_while_waiting = sum(1 for t in tick_times if wait_start <= t <= wait_end)
+        assert ticks_while_waiting > 0, "Event loop appeared to be blocked while waiting to acquire the lock"
 
     async def test_async_lock_different_names_no_conflict(self) -> None:
         """Test that async locks with different names allow concurrent execution"""
         lock_hold_time = 0.1
-        results: list[float] = []
+        intervals: dict[str, tuple[float, float]] = {}
 
         async def acquire_lock(name: str) -> None:
-            start = time.time()
             async with AsyncLock(name):
+                start = time.time()
                 await asyncio.sleep(lock_hold_time)
-            results.append(time.time() - start)
+                intervals[name] = (start, time.time())
 
-        overall_start = time.time()
-        await asyncio.gather(
-            acquire_lock(f"async_lock_a_{uuid.uuid4()}"),
-            acquire_lock(f"async_lock_b_{uuid.uuid4()}"),
-        )
-        overall_duration = time.time() - overall_start
+        name_a, name_b = f"async_lock_a_{uuid.uuid4()}", f"async_lock_b_{uuid.uuid4()}"
+        await asyncio.gather(acquire_lock(name_a), acquire_lock(name_b))
 
-        assert overall_duration < lock_hold_time * 1.5, (
-            f"Locks with different names should allow concurrent execution. "
-            f"Expected ~{lock_hold_time}s, got {overall_duration:.2f}s"
-        )
+        # See the sync counterpart (test_lock_different_names_no_conflict) for why overlap
+        # rather than total duration is checked.
+        (start_a, end_a), (start_b, end_b) = intervals[name_a], intervals[name_b]
+        overlap = min(end_a, end_b) - max(start_a, start_b)
+        assert overlap > 0, f"Locks with different names should allow concurrent execution (no overlap: {intervals})"
 
     async def test_async_lock_reentrant_same_name(self) -> None:
         """Test that an async lock can be re-acquired within the same task without deadlocking."""
