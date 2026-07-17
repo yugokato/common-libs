@@ -10,6 +10,7 @@ from common_libs.logging import get_logger
 
 from .base import RestClientBase
 from .hooks import inject_hooks
+from .rate_limit import RateLimit
 from .retry import DEFAULT_RETRY_POLICY, RetryPolicy
 from .types import RestResponse
 from .utils import manage_content_type
@@ -29,7 +30,8 @@ class RestClient(RestClientBase):
         log_headers: bool = False,
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
-        **kwargs: Any,
+        rate_limit: RateLimit | None = None,
+        **httpx_raw_opts: Any,
     ) -> None:
         try:
             asyncio.get_running_loop()
@@ -44,7 +46,8 @@ class RestClient(RestClientBase):
             log_headers=log_headers,
             prettify_response_log=prettify_response_log,
             retry_policy=retry_policy,
-            **kwargs,
+            rate_limit=rate_limit,
+            **httpx_raw_opts,
         )
 
     def __enter__(self) -> Self:
@@ -154,6 +157,7 @@ class AsyncRestClient(RestClientBase):
         log_headers: bool = False,
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        rate_limit: RateLimit | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -162,6 +166,7 @@ class AsyncRestClient(RestClientBase):
             prettify_response_log=prettify_response_log,
             async_mode=True,
             retry_policy=retry_policy,
+            rate_limit=rate_limit,
             **kwargs,
         )
 

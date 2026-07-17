@@ -13,6 +13,7 @@ from httpx._auth import Auth
 
 from common_libs.logging import get_logger
 
+from .rate_limit import RateLimit, RateLimiter
 from .retry import DEFAULT_RETRY_POLICY, RetryPolicy, retry_on
 from .types import Request, Response
 from .utils import SAFE_HTTP_METHODS, is_connection_reset, set_request_to_exception
@@ -34,10 +35,17 @@ class HTTPClientMixin:
 
     _request_id_header = "X-Request-ID"
 
-    def __init__(self, *args: Any, retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY, **kwargs: Any) -> None:
-        """Initialize the mixin and build the retry decorator from the given policy.
+    def __init__(
+        self,
+        *args: Any,
+        retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
+        rate_limit: RateLimit | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the mixin and build the retry decorator and rate limiter from the given configs.
 
         :param retry_policy: Retry policy controlling automatic retry behavior, or `None` to disable retries.
+        :param rate_limit: Client-side rate limit enforced on every request attempt, or `None` to disable.
         :param args: Positional arguments forwarded to the underlying httpx client.
         :param kwargs: Keyword arguments forwarded to the underlying httpx client.
         """
@@ -51,6 +59,7 @@ class HTTPClientMixin:
             if retry_policy is not None
             else None
         )
+        self._rate_limiter: RateLimiter | None = RateLimiter(rate_limit) if rate_limit is not None else None
         super().__init__(*args, **kwargs)
 
     def build_request(self, *args: Any, **kwargs: Any) -> Request:
@@ -155,6 +164,7 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
         """Add following behaviors to httpx's client.send()
 
         - Set X-Request-ID header
+        - Apply the client-side rate limit per attempt (when configured)
         - Dispatch request hooks
         - Reconnect in case a connection is reset by peer (safe methods only)
         - Retry on the configured policy (default: 503)
@@ -178,6 +188,8 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
 
     def _send(self, request: Request, **kwargs: Any) -> Response:
         """Send a request"""
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
         self.call_request_hooks(request)
         try:
             with self.set_timestamp(request):
@@ -197,6 +209,7 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
         """Add following behaviors to httpx's async client.send()
 
         - Set X-Request-ID header
+        - Apply the client-side rate limit per attempt (when configured)
         - Dispatch request hooks
         - Reconnect in case a connection is reset by peer (safe methods only)
         - Retry on the configured policy (default: 503)
@@ -220,6 +233,8 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
 
     async def _send(self, request: Request, **kwargs: Any) -> Response:
         """Send a request"""
+        if self._rate_limiter is not None:
+            await self._rate_limiter.aacquire()
         await self.acall_request_hooks(request)
         try:
             with self.set_timestamp(request):
