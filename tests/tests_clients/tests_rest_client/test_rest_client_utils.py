@@ -530,13 +530,13 @@ class TestManageContentType:
         assert injected["Content-Type"] == "application/json"
         assert injected["X-Custom"] == "value"
 
-    def test_empty_json_payload_sends_no_body(self, client: AsyncRestClient) -> None:
-        """Test that an empty json={} payload is normalized to no body and no Content-Type is injected"""
+    def test_empty_json_payload_sends_no_body_but_sets_content_type(self, client: AsyncRestClient) -> None:
+        """Test that an empty json={} payload is normalized to no body, but Content-Type is still injected"""
         captured: dict[str, Any] = {}
         dummy = self._make_decorated("sync", captured)
         dummy(client, json={})
         assert captured["kwargs"].get("json") is None
-        assert "headers" not in captured["kwargs"]
+        assert captured["kwargs"]["headers"] == {"Content-Type": "application/json"}
 
     def test_does_not_set_content_type_for_json_with_files(self, client: AsyncRestClient) -> None:
         """Test that Content-Type is not injected when both json and files are present"""

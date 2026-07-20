@@ -166,6 +166,7 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
 
     @wraps(f)
     def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> T:
+        is_json_request = "json" in kwargs
         if kwargs.get("json") == {}:
             kwargs["json"] = None
         session_headers = self.client.headers
@@ -173,11 +174,7 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
         request_headers: dict[str, Any] = dict(raw_headers or {})
         merged = {**session_headers, **request_headers}
         has_content_type_header = "Content-Type" in [h.title() for h in merged]
-        if (
-            not has_content_type_header
-            and kwargs.get("json") is not None
-            and not any([kwargs.get("data"), kwargs.get("files")])
-        ):
+        if not has_content_type_header and is_json_request and not any([kwargs.get("data"), kwargs.get("files")]):
             request_headers["Content-Type"] = "application/json"
             kwargs["headers"] = request_headers
         return f(self, *args, **kwargs)
