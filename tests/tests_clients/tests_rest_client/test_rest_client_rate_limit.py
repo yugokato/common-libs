@@ -51,27 +51,27 @@ class TestRateLimit:
     def test_rejects_float_max_requests(self) -> None:
         """Test that a float max_requests raises ValueError"""
         with pytest.raises(ValueError, match="max_requests must be a positive integer"):
-            RateLimit(2.5)  # type: ignore[arg-type]
+            RateLimit(2.5)
 
     def test_rejects_non_numeric_max_requests(self) -> None:
         """Test that a non-numeric max_requests raises ValueError"""
         with pytest.raises(ValueError, match="max_requests must be a positive integer"):
-            RateLimit("2")  # type: ignore[arg-type]
+            RateLimit("2")
 
     def test_rejects_non_numeric_interval(self) -> None:
         """Test that a non-numeric interval raises ValueError"""
         with pytest.raises(ValueError, match="interval must be a positive number"):
-            RateLimit(1, interval="1")  # type: ignore[arg-type]
+            RateLimit(1, interval="1")
 
     def test_rejects_bool_max_requests(self) -> None:
         """Test that a bool max_requests raises ValueError"""
         with pytest.raises(ValueError, match="max_requests must be a positive integer"):
-            RateLimit(True)  # type: ignore[arg-type]
+            RateLimit(True)
 
     def test_rejects_bool_interval(self) -> None:
         """Test that a bool interval raises ValueError"""
         with pytest.raises(ValueError, match="interval must be a positive number"):
-            RateLimit(1, interval=True)  # type: ignore[arg-type]
+            RateLimit(1, interval=True)
 
 
 class TestRateLimiter:
