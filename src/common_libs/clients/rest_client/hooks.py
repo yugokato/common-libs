@@ -16,6 +16,7 @@ from common_libs.logging import get_logger
 
 from .utils import (
     get_response_reason,
+    get_response_time,
     mask_sensitive_headers,
     parse_query_strings,
     process_request_body,
@@ -102,7 +103,7 @@ def _log_response(response: Response, quiet: bool, rest_client: ClientType, proc
         "path": str(request.url),
         "status_code": response.status_code,
         "response_headers": mask_sensitive_headers(dict(response.headers)),
-        "response_time": None if response.is_stream else response.elapsed.total_seconds(),
+        "response_time": get_response_time(response),
         "response": processed_resp,
     }
 

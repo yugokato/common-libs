@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -10,6 +10,9 @@ from httpx import Request as _Request
 from httpx import Response as _Response
 
 JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
+
+StreamMode: TypeAlias = Literal["text", "bytes", "line", "raw"]
+_STREAM_MODES: tuple[StreamMode, ...] = ("text", "bytes", "line", "raw")
 
 
 class Request(_Request):
@@ -39,7 +42,7 @@ class RestResponse:
     """Response class that wraps the httpx Response object"""
 
     # raw response returned from httpx lib
-    _response: Response = field(init=True)
+    _response: Response
 
     request_id: str = field(init=False)
     status_code: int = field(init=False)
@@ -50,66 +53,64 @@ class RestResponse:
     is_stream: bool = field(init=False)
 
     def __post_init__(self) -> None:
-        is_stream = self._response.is_stream
-        object.__setattr__(self, "request_id", self._response.request.request_id)
-        object.__setattr__(self, "status_code", self._response.status_code)
-        object.__setattr__(self, "response_time", None if is_stream else self._response.elapsed.total_seconds())
-        if is_stream and self._response.is_success:
-            object.__setattr__(self, "response", None)
-        else:
-            object.__setattr__(self, "response", self._process_response(self._response))
-        object.__setattr__(self, "request", self._response.request)
-        object.__setattr__(self, "ok", self._response.is_success)
-        object.__setattr__(self, "is_stream", is_stream)
+        from .utils import get_response_time, process_response
+
+        resp = self._response
+        is_stream = resp.is_stream
+        for name, value in {
+            "request_id": resp.request.request_id,
+            "status_code": resp.status_code,
+            "response_time": get_response_time(resp),
+            "response": None if (is_stream and resp.is_success) else process_response(resp),
+            "request": resp.request,
+            "ok": resp.is_success,
+            "is_stream": is_stream,
+        }.items():
+            object.__setattr__(self, name, value)
 
     def raise_for_status(self) -> None:
+        """Raise an exception if the response has an error status code."""
         self._response.raise_for_status()
 
-    def stream(
-        self, mode: Literal["text", "bytes", "line", "raw"] = "text", chunk_size: int | None = None
-    ) -> Generator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions"""
+    def stream(self, mode: StreamMode = "text", chunk_size: int | None = None) -> Iterator[str | bytes]:
+        """Shortcut to various httpx's response iteration functions
+
+        :param mode: The streaming mode: `text`, `bytes`, `line`, or `raw`.
+        :param chunk_size: The size of each chunk to read. Not supported for `line` mode.
+        """
+        self._validate_stream(mode, chunk_size)
+        funcs: dict[StreamMode, Callable[[], Iterator[str | bytes]]] = {
+            "text": partial(self._response.iter_text, chunk_size=chunk_size),
+            "bytes": partial(self._response.iter_bytes, chunk_size=chunk_size),
+            "line": self._response.iter_lines,
+            "raw": partial(self._response.iter_raw, chunk_size=chunk_size),
+        }
+        return funcs[mode]()
+
+    def astream(self, mode: StreamMode = "text", chunk_size: int | None = None) -> AsyncIterator[str | bytes]:
+        """Shortcut to various httpx's response iteration functions (for async)
+
+        :param mode: The streaming mode: `text`, `bytes`, `line`, or `raw`.
+        :param chunk_size: The size of each chunk to read. Not supported for `line` mode.
+        """
+        self._validate_stream(mode, chunk_size)
+        funcs: dict[StreamMode, Callable[[], AsyncIterator[str | bytes]]] = {
+            "text": partial(self._response.aiter_text, chunk_size=chunk_size),
+            "bytes": partial(self._response.aiter_bytes, chunk_size=chunk_size),
+            "line": self._response.aiter_lines,
+            "raw": partial(self._response.aiter_raw, chunk_size=chunk_size),
+        }
+        return funcs[mode]()
+
+    def _validate_stream(self, mode: StreamMode, chunk_size: int | None) -> None:
+        """Validate stream mode/chunk_size before an iterator is built
+
+        :param mode: The streaming mode to validate.
+        :param chunk_size: The chunk size to validate.
+        """
         if not self.is_stream:
             raise ValueError("This response is not a stream")
-
-        if mode == "text":
-            iter_func = partial(self._response.iter_text, chunk_size=chunk_size)
-        elif mode == "bytes":
-            iter_func = partial(self._response.iter_bytes, chunk_size=chunk_size)
-        elif mode == "line":
-            if chunk_size:
-                raise ValueError("chunk size is not supported for line-by-line streaming")
-            iter_func = self._response.iter_lines
-        elif mode == "raw":
-            iter_func = partial(self._response.iter_raw, chunk_size=chunk_size)
-        else:
+        if mode not in _STREAM_MODES:
             raise ValueError(f"Invalid mode: {mode}")
-        yield from iter_func()
-
-    async def astream(
-        self, mode: Literal["text", "bytes", "line", "raw"] = "text", chunk_size: int | None = None
-    ) -> AsyncGenerator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions (for async)"""
-        if not self.is_stream:
-            raise ValueError("This response is not a stream")
-
-        if mode == "text":
-            iter_func = partial(self._response.aiter_text, chunk_size=chunk_size)
-        elif mode == "bytes":
-            iter_func = partial(self._response.aiter_bytes, chunk_size=chunk_size)
-        elif mode == "line":
-            if chunk_size:
-                raise ValueError("chunk size is not supported for line-by-line streaming")
-            iter_func = self._response.aiter_lines
-        elif mode == "raw":
-            iter_func = partial(self._response.aiter_raw, chunk_size=chunk_size)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-        async for d in iter_func():
-            yield d
-
-    def _process_response(self, response: Response) -> JSONType:
-        """Get json-encoded content of a response if possible, otherwise return content of the response."""
-        from .utils import process_response
-
-        return process_response(response)
+        if mode == "line" and chunk_size:
+            raise ValueError("chunk size is not supported for line-by-line streaming")

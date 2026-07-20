@@ -1,7 +1,7 @@
 """Tests for common_libs.clients.rest_client.ext module"""
 
 import errno
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -129,6 +129,36 @@ class TestRestResponse:
         with pytest.raises(ValueError, match="Invalid mode"):
             next(rest_response.stream(mode="invalid"))
 
+    def test_stream_raises_for_non_stream_response_before_iteration(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that stream() raises ValueError as soon as it's called, without requiring iteration"""
+        mock_resp = mock_response_factory(200)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="not a stream"):
+            rest_response.stream()
+
+    def test_stream_invalid_mode_raises_value_error_before_iteration(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that stream() raises ValueError for an invalid mode as soon as it's called"""
+        mock_resp = mock_response_factory(200, is_stream=True)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="Invalid mode"):
+            rest_response.stream(mode="invalid")
+
+    def test_stream_line_mode_with_chunk_size_raises_value_error(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that stream() raises ValueError when chunk_size is given together with line mode"""
+        mock_resp = mock_response_factory(200, is_stream=True)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="chunk size is not supported"):
+            rest_response.stream(mode="line", chunk_size=10)
+
     def test_stream_text_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
         """Test that stream() in text mode yields whole string chunks, not individual characters"""
         chunks = ["hello", " world"]
@@ -170,6 +200,80 @@ class TestRestResponse:
 
         rest_response = RestResponse(mock_resp)
         result = list(rest_response.stream(mode="raw"))
+
+        assert result == chunks
+
+    async def test_astream_raises_for_non_stream_response(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that astream() raises ValueError as soon as it's called, without requiring iteration"""
+        mock_resp = mock_response_factory(200)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="not a stream"):
+            rest_response.astream()
+
+    async def test_astream_invalid_mode_raises_value_error(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that astream() raises ValueError for an invalid mode as soon as it's called"""
+        mock_resp = mock_response_factory(200, is_stream=True)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="Invalid mode"):
+            rest_response.astream(mode="invalid")
+
+    async def test_astream_line_mode_with_chunk_size_raises_value_error(
+        self, mock_response_factory: Callable[..., MagicMock]
+    ) -> None:
+        """Test that astream() raises ValueError when chunk_size is given together with line mode"""
+        mock_resp = mock_response_factory(200, is_stream=True)
+        rest_response = RestResponse(mock_resp)
+
+        with pytest.raises(ValueError, match="chunk size is not supported"):
+            rest_response.astream(mode="line", chunk_size=10)
+
+    async def test_astream_text_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that astream() in text mode yields whole string chunks, not individual characters"""
+        chunks = ["hello", " world"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.aiter_text.return_value = _async_iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = [chunk async for chunk in rest_response.astream(mode="text")]
+
+        assert result == chunks
+
+    async def test_astream_bytes_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that astream() in bytes mode yields whole bytes chunks, not individual ints"""
+        chunks = [b"foo", b"bar"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.aiter_bytes.return_value = _async_iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = [chunk async for chunk in rest_response.astream(mode="bytes")]
+
+        assert result == chunks
+
+    async def test_astream_line_yields_whole_lines(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that astream() in line mode yields whole lines, not individual characters"""
+        lines = ["line one", "line two"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.aiter_lines.return_value = _async_iter(lines)
+
+        rest_response = RestResponse(mock_resp)
+        result = [line async for line in rest_response.astream(mode="line")]
+
+        assert result == lines
+
+    async def test_astream_raw_yields_whole_chunks(self, mock_response_factory: Callable[..., MagicMock]) -> None:
+        """Test that astream() in raw mode yields whole bytes chunks, not individual ints"""
+        chunks = [b"\x00\x01", b"\x02\x03"]
+        mock_resp = mock_response_factory(200, is_stream=True)
+        mock_resp.aiter_raw.return_value = _async_iter(chunks)
+
+        rest_response = RestResponse(mock_resp)
+        result = [chunk async for chunk in rest_response.astream(mode="raw")]
 
         assert result == chunks
 
@@ -499,3 +603,9 @@ class TestConnectionResetReconnect:
                 await client.send(request)
 
         assert send_mock.call_count == 1
+
+
+async def _async_iter(items: Iterable[str | bytes]) -> AsyncIterator[str | bytes]:
+    """Build an async iterator from `items`, for mocking httpx's `aiter_*` methods"""
+    for item in items:
+        yield item

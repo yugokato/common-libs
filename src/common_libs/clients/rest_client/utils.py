@@ -125,6 +125,14 @@ def parse_query_strings(url: str) -> dict[str, Any] | None:
     return None
 
 
+def get_response_time(response: Response) -> float | None:
+    """Return the response's elapsed time in seconds, or `None` for a streaming response.
+
+    :param response: The response to read the elapsed time from.
+    """
+    return None if response.is_stream else response.elapsed.total_seconds()
+
+
 def get_response_reason(response: Response) -> str:
     """Get response reason from the response. If the response doesn't have the value, we resolve it using HTTPStatus"""
     if response.reason_phrase:
