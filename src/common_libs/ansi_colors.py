@@ -1,5 +1,7 @@
+import os
 import re
-from typing import Any
+import sys
+from typing import IO, Any
 
 PATTERN_COLOR_CODE = r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])"
 
@@ -30,6 +32,26 @@ class ColorCodes:
     NEGATIVE = "\x1b[7m"
 
 
+def should_color(stream: IO[str] | None = None) -> bool:
+    """Determine whether ANSI color codes should be applied for the given stream
+
+    `FORCE_COLOR` wins when set (any value other than `0`/`false`, case-insensitive, enables color, a falsy
+    value disables it even on a terminal). Otherwise, the presence of the `NO_COLOR` environment variable
+    disables color. Otherwise, color is enabled only when the stream is a terminal.
+
+    :param stream: The stream color output would be written to. Defaults to `sys.stdout`
+    """
+    if stream is None:
+        stream = sys.stdout
+    force_color = os.environ.get("FORCE_COLOR")
+    if force_color is not None:
+        return force_color.strip().lower() not in ("", "0", "false")
+    if "NO_COLOR" in os.environ:
+        return False
+    isatty = getattr(stream, "isatty", None)
+    return isatty() if isatty is not None else False
+
+
 def color(
     text: Any,
     color_code: str | None = ColorCodes.GREEN,
@@ -39,6 +61,9 @@ def color(
 ) -> str:
     """Add ANSI color code to string
 
+    No color is added when `should_color()` (checked against `sys.stdout`) is `False`, eg. when `NO_COLOR` is
+    set or output isn't a terminal.
+
     :param text: The original text to color
     :param color_code: ANSI color code
     :param bold: Bold text
@@ -47,6 +72,8 @@ def color(
     """
     if not isinstance(text, str):
         text = str(text)
+    if not should_color():
+        return text
 
     colored_str = text
     if bold:

@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Generator, Iterator
 from typing import Any
 
-from common_libs.ansi_colors import ColorCodes, color, remove_color_code
+from common_libs.ansi_colors import ColorCodes, remove_color_code
 from common_libs.logging import get_logger
 
 logger = get_logger(__name__)
@@ -226,6 +226,9 @@ def _apply_color(line: str, color_code: str) -> str:
 
     Existing colored texts will be preserved as is on top of the colored line by replacing all existing "default"
     color code in the middle of the line with the new color code.
+
+    Unlike `common_libs.ansi_colors.color()`, this always applies the color code regardless of `should_color()`,
+    since the colored line is returned for the caller to display or store rather than written to a known stream.
     """
     default_color_code_pattern = rf"{re.escape(ColorCodes.DEFAULT)}|{re.escape(ColorCodes.DEFAULT2)}"
-    return color(re.sub(default_color_code_pattern, color_code, line), color_code=color_code)
+    return f"{color_code}{re.sub(default_color_code_pattern, color_code, line)}{ColorCodes.DEFAULT}"

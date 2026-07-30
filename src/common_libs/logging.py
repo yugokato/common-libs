@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Mapping, MutableMapping
 from enum import StrEnum, auto
@@ -12,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from common_libs.ansi_colors import ColorCodes, color
+from common_libs.ansi_colors import ColorCodes, color, should_color
 
 
 def setup_logging(config: Mapping[str, Any] | None = None, delta_config: Mapping[str, Any] | None = None) -> None:
@@ -147,20 +146,10 @@ class ColoredStreamHandler(logging.StreamHandler):  # type: ignore[type-arg]
         than `0`/`false`) to colorize regardless, or to `0`/`false` to force it off even on a terminal.
         """
         msg = super().format(record)
-        if not self._should_colorize():
+        if not should_color(self.stream):
             return msg
         color_code = getattr(record, CustomLoggingArgs.COLOR_CODE, None) or self._get_color_code(record.levelno)
         return color(msg, color_code=color_code)
-
-    def _should_colorize(self) -> bool:
-        """Determine whether ANSI color should be applied to the formatted output"""
-        force_color = os.environ.get("FORCE_COLOR")
-        if force_color is not None:
-            return force_color.strip().lower() not in ("", "0", "false")
-        if "NO_COLOR" in os.environ:
-            return False
-        isatty = getattr(self.stream, "isatty", None)
-        return isatty() if isatty is not None else False
 
     @staticmethod
     def _get_color_code(level: int) -> str | None:
