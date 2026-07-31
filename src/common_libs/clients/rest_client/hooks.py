@@ -136,7 +136,7 @@ def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType,
                 f"request_id: {request.request_id}\n"
                 f"request: {request.method} {request.url}\n"
                 f"status_code: {response.status_code}\n"
-                f"response:{processed_resp}\n"
+                f"response: {processed_resp}\n"
             )
             sys.stdout.write(color(err, color_code=ColorCodes.RED))
             sys.stdout.flush()
