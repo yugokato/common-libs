@@ -12,8 +12,20 @@ import uuid
 from typing import Any
 
 import pytest
-from pytest import Config, Item, Session
+from pytest import Config, Item, MonkeyPatch, Session
 from xdist import is_xdist_worker
+
+
+@pytest.fixture(autouse=True)
+def _enable_tty(monkeypatch: MonkeyPatch) -> None:
+    """Enable ANSI colors under pytest's output capture.
+
+    Pytest replaces stdout and stderr with non-TTY streams during test execution,
+    which disables ANSI color output from code that checks ``isatty()``. This fixture makes sure ANSI colors are
+    enabled for all tests, even when output is captured.
+    """
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
 
 
 @pytest.hookimpl(tryfirst=True)
