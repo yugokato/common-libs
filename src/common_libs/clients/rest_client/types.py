@@ -9,7 +9,7 @@ from typing import Any, Literal, TypeAlias
 from httpx import Request as _Request
 from httpx import Response as _Response
 
-JSONType: TypeAlias = str | int | float | bool | None | list["JSONType"] | dict[str, "JSONType"]
+JSONType: TypeAlias = str | int | float | bool | list["JSONType"] | dict[str, "JSONType"] | None
 
 StreamMode: TypeAlias = Literal["text", "bytes", "line", "raw"]
 _STREAM_MODES: tuple[StreamMode, ...] = ("text", "bytes", "line", "raw")
