@@ -142,9 +142,10 @@ class HTTPClientMixin:
             )
         else:
             logger.error(
-                f"An unexpected error occurred while processing the API request (request_id: {request.request_id})\n"
-                f"request: {request.method.upper()} {request.url}\n"
-                f"error: {type(e).__name__}: {e}",
+                f"An unexpected error occurred while processing the API request\n"
+                f"- request: {request.method.upper()} {request.url}\n"
+                f"- error: {type(e).__name__}: {e}\n"
+                f"- request_id: {request.request_id}",
                 extra=log_data,
             )
 
