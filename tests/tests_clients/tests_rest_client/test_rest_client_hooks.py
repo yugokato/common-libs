@@ -1,9 +1,12 @@
 """Tests for common_libs.clients.rest_client.hooks module"""
 
+import logging
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
+import httpx
+import pytest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.hooks import (
@@ -15,7 +18,16 @@ from common_libs.clients.rest_client.hooks import (
 )
 from common_libs.clients.rest_client.rest_client import RestClient
 from common_libs.clients.rest_client.types import Request
-from common_libs.clients.rest_client.utils import TRUNCATE_LEN
+from common_libs.clients.rest_client.utils import TRUNCATE_LEN, format_request_failure
+
+HOOKS_LOGGER_NAME = "common_libs.clients.rest_client.hooks"
+
+
+def _not_found_handler(request: httpx.Request) -> httpx.Response:
+    """Serve a canned 404 response"""
+    return httpx.Response(
+        404, stream=httpx.ByteStream(b'{"error": "not found"}'), headers={"Content-Type": "application/json"}
+    )
 
 
 class TestInjectHooks:
@@ -88,6 +100,19 @@ class TestGetHooks:
         hooks_verbose = get_hooks(client, quiet=False)
         assert hooks_quiet is not hooks_verbose
 
+    def test_returns_empty_dict_when_log_requests_disabled(self) -> None:
+        """Test that get_hooks returns an empty dict when log_requests is False, unless quiet is explicitly
+        False
+        """
+        client = RestClient("http://example.com", log_requests=False)
+        assert get_hooks(client, quiet=None) == {}
+        assert get_hooks(client, quiet=True) == {}
+
+    def test_explicit_quiet_false_overrides_log_requests_disabled(self) -> None:
+        """Test that an explicit quiet=False re-enables hooks on a log_requests=False client"""
+        client = RestClient("http://example.com", log_requests=False)
+        assert get_hooks(client, quiet=False) != {}
+
 
 class TestRequestHooks:
     """Tests for request_hooks function"""
@@ -130,18 +155,41 @@ class TestResponseHooks:
         response_hooks(mock_response, quiet=False, rest_client=mock_client)
         mock_hooks_logger.info.assert_called()
 
-    def test_response_hooks_logs_error_regardless_of_quiet(
+    def test_response_hooks_logs_a_one_line_summary_and_no_console_summary_when_quiet(
         self, mock_hooks_logger: MagicMock, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that response_hooks always logs error responses even when quiet=True"""
-        mocker.patch("common_libs.clients.rest_client.hooks._print_api_summary")
+        """Test that response_hooks still logs an error response when quiet=True, reduced to the one-line
+        failure summary, and skips the console summary entirely
+        """
+        mock_print_summary = mocker.patch("common_libs.clients.rest_client.hooks._print_api_summary")
 
         mock_response = mock_response_factory(500)
         mock_client = mocker.MagicMock()
         mock_client.prettify_response_log = False
 
         response_hooks(mock_response, quiet=True, rest_client=mock_client)
-        mock_hooks_logger.error.assert_called()
+
+        mock_hooks_logger.error.assert_called_once()
+        assert mock_hooks_logger.error.call_args[0][0] == format_request_failure(mock_response)
+        mock_print_summary.assert_not_called()
+
+    def test_response_hooks_logs_the_verbose_message_and_console_summary_when_not_quiet(
+        self, mock_hooks_logger: MagicMock, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
+    ) -> None:
+        """Test that response_hooks logs the verbose `response: <code> (<reason>)` message and still prints the
+        console summary for an error response when quiet=False
+        """
+        mock_print_summary = mocker.patch("common_libs.clients.rest_client.hooks._print_api_summary")
+
+        mock_response = mock_response_factory(500)
+        mock_client = mocker.MagicMock()
+        mock_client.prettify_response_log = False
+
+        response_hooks(mock_response, quiet=False, rest_client=mock_client)
+
+        mock_hooks_logger.error.assert_called_once()
+        assert mock_hooks_logger.error.call_args[0][0] == "response: 500 (Error)"
+        mock_print_summary.assert_called_once()
 
 
 class TestHeaderMasking:
@@ -230,7 +278,7 @@ class TestPayloadTruncation:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp=None)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None)
 
         output = "".join(written)
         assert "TRUNCATED" in output
@@ -260,7 +308,7 @@ class TestPayloadTruncation:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp=None)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None)
 
         output = "".join(written)
         assert "TRUNCATED" not in output
@@ -286,14 +334,14 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp="ok body")
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body")
 
         assert written == []
 
     def test_summary_silent_on_error_when_info_not_enabled(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
-        """Test that no summary is printed for an error response when INFO logging is not enabled, even if quiet"""
+        """Test that no summary is printed for an error response when INFO logging is not enabled"""
         mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=False)
 
         mock_response = mock_response_factory(500)
@@ -306,7 +354,7 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, quiet=True, rest_client=mock_client, processed_resp="error body")
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="error body")
 
         assert written == []
 
@@ -326,8 +374,93 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, quiet=False, rest_client=mock_client, processed_resp="ok body")
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body")
 
         output = "".join(written)
         assert "status_code" in output
         assert "ok body" in output
+
+
+class TestLogRequestsDisabled:
+    """Tests that `log_requests=False` fully suppresses request/response hooks end-to-end, overridable only
+    by an explicit `quiet=False` on an individual call
+    """
+
+    def test_failed_call_produces_no_log_record_or_summary_when_disabled(
+        self, caplog: pytest.LogCaptureFixture, mocker: MockFixture
+    ) -> None:
+        """Test that a non-2xx response emits neither a log record nor a console summary when log_requests
+        is False
+        """
+        caplog.set_level(logging.INFO, logger=HOOKS_LOGGER_NAME)
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        with RestClient(
+            "https://example.com",
+            log_requests=False,
+            retry_policy=None,
+            transport=httpx.MockTransport(_not_found_handler),
+        ) as client:
+            client.get("/missing")
+
+        assert caplog.records == []
+        assert written == []
+
+    def test_failed_call_stays_silent_when_explicitly_quiet(
+        self, caplog: pytest.LogCaptureFixture, mocker: MockFixture
+    ) -> None:
+        """Test that an explicit quiet=True on a log_requests=False client still emits nothing"""
+        caplog.set_level(logging.INFO, logger=HOOKS_LOGGER_NAME)
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        with RestClient(
+            "https://example.com",
+            log_requests=False,
+            retry_policy=None,
+            transport=httpx.MockTransport(_not_found_handler),
+        ) as client:
+            client.get("/missing", quiet=True)
+
+        assert caplog.records == []
+        assert written == []
+
+    def test_explicit_quiet_false_overrides_log_requests_disabled(
+        self, caplog: pytest.LogCaptureFixture, mocker: MockFixture
+    ) -> None:
+        """Test that an explicit quiet=False on a log_requests=False client re-enables logging for that call"""
+        caplog.set_level(logging.INFO, logger=HOOKS_LOGGER_NAME)
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        with RestClient(
+            "https://example.com",
+            log_requests=False,
+            retry_policy=None,
+            transport=httpx.MockTransport(_not_found_handler),
+        ) as client:
+            client.get("/missing", quiet=False)
+
+        assert any(record.levelno == logging.ERROR for record in caplog.records)
+        assert "".join(written) != ""
+
+    def test_failed_call_still_logs_and_prints_summary_when_enabled(
+        self, caplog: pytest.LogCaptureFixture, mocker: MockFixture
+    ) -> None:
+        """Test that the same failed call logs an error and prints a console summary when log_requests is True"""
+        caplog.set_level(logging.INFO, logger=HOOKS_LOGGER_NAME)
+        written: list[str] = []
+        mocker.patch("sys.stdout.write", side_effect=written.append)
+        mocker.patch("sys.stdout.flush")
+
+        with RestClient(
+            "https://example.com", retry_policy=None, transport=httpx.MockTransport(_not_found_handler)
+        ) as client:
+            client.get("/missing")
+
+        assert any(record.levelno == logging.ERROR for record in caplog.records)
+        assert "".join(written) != ""

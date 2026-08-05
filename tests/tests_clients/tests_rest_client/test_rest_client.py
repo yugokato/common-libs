@@ -20,6 +20,12 @@ class TestRestClient:
         client = RestClient("http://example.com")
         assert isinstance(client.client, SyncHTTPClient)
         assert client.async_mode is False
+        assert client.log_requests is True
+
+    def test_init_log_requests_disabled(self) -> None:
+        """Test that RestClient forwards log_requests=False to the underlying RestClientBase"""
+        client = RestClient("http://example.com", log_requests=False)
+        assert client.log_requests is False
 
     def test_init_raises_in_async_context(self) -> None:
         """Test that RestClient raises RuntimeError when created in async context"""
@@ -167,6 +173,12 @@ class TestAsyncRestClient:
         client = AsyncRestClient("http://example.com")
         assert isinstance(client.client, AsyncHTTPClient)
         assert client.async_mode is True
+        assert client.log_requests is True
+
+    def test_init_log_requests_disabled(self) -> None:
+        """Test that AsyncRestClient forwards log_requests=False to the underlying RestClientBase"""
+        client = AsyncRestClient("http://example.com", log_requests=False)
+        assert client.log_requests is False
 
     async def test_get_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
         """Test that get() in async mode calls the underlying HTTP client via request() and returns response as a

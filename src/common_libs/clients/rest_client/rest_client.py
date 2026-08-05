@@ -27,6 +27,7 @@ class RestClient(RestClientBase):
         self,
         base_url: str,
         *,
+        log_requests: bool = True,
         log_headers: bool = False,
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
@@ -43,6 +44,7 @@ class RestClient(RestClientBase):
             )
         super().__init__(
             base_url,
+            log_requests=log_requests,
             log_headers=log_headers,
             prettify_response_log=prettify_response_log,
             retry_policy=retry_policy,
@@ -60,61 +62,67 @@ class RestClient(RestClientBase):
         """Close the underlying httpx client"""
         self.client.close()
 
-    def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    def get(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
         """Make a GET API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param query_params: Query parameters
         """
         return self._request("GET", path, params=query_params, quiet=quiet)
 
     def post(
-        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
+        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool | None = None, **payload: Any
     ) -> RestResponse:
         """Make a POST API request
 
         :param path: Endpoint path
         :param files: File to upload
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload. When `files` is provided, these are sent as multipart form fields instead.
         """
         if files:
             return self._request("POST", path, data=payload or None, files=files, quiet=quiet)
         return self._request("POST", path, json=payload, quiet=quiet)
 
-    def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def delete(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a DELETE API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return self._request("DELETE", path, json=payload, quiet=quiet)
 
-    def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def put(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a PUT API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return self._request("PUT", path, json=payload, quiet=quiet)
 
-    def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    def patch(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a PATCH API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return self._request("PATCH", path, json=payload, quiet=quiet)
 
-    def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    def options(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param query_params: Query parameters
         """
         return self._request("OPTIONS", path, params=query_params, quiet=quiet)
@@ -122,12 +130,15 @@ class RestClient(RestClientBase):
     @contextmanager
     @inject_hooks
     @manage_content_type
-    def stream(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> Generator[RestResponse]:
+    def stream(
+        self, method: str, path: str, /, *, quiet: bool | None = None, **raw_options: Any
+    ) -> Generator[RestResponse]:
         """Stream an HTTP API request
 
         :param method: Endpoint method
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         with self.client.stream(method.upper(), path, **raw_options) as r:
@@ -135,12 +146,13 @@ class RestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    def _request(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    def _request(self, method: str, path: str, /, *, quiet: bool | None = None, **raw_options: Any) -> RestResponse:
         """Low-level function for all HTTP verb methods
 
         :param method: HTTP method
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         r = self.client.request(method.upper(), path, **raw_options)
@@ -154,6 +166,7 @@ class AsyncRestClient(RestClientBase):
         self,
         base_url: str,
         *,
+        log_requests: bool = True,
         log_headers: bool = False,
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
@@ -162,6 +175,7 @@ class AsyncRestClient(RestClientBase):
     ) -> None:
         super().__init__(
             base_url,
+            log_requests=log_requests,
             log_headers=log_headers,
             prettify_response_log=prettify_response_log,
             async_mode=True,
@@ -214,61 +228,67 @@ class AsyncRestClient(RestClientBase):
         """Close the underlying httpx client"""
         await self.client.aclose()
 
-    async def get(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    async def get(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
         """Make a GET API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param query_params: Query parameters
         """
         return await self._request("GET", path, params=query_params, quiet=quiet)
 
     async def post(
-        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool = False, **payload: Any
+        self, path: str, /, *, files: dict[str, Any] | None = None, quiet: bool | None = None, **payload: Any
     ) -> RestResponse:
         """Make a POST API request
 
         :param path: Endpoint path
         :param files: File to upload
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload. When `files` is provided, these are sent as multipart form fields instead.
         """
         if files:
             return await self._request("POST", path, data=payload or None, files=files, quiet=quiet)
         return await self._request("POST", path, json=payload, quiet=quiet)
 
-    async def delete(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def delete(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a DELETE API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return await self._request("DELETE", path, json=payload, quiet=quiet)
 
-    async def put(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def put(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a PUT API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return await self._request("PUT", path, json=payload, quiet=quiet)
 
-    async def patch(self, path: str, /, *, quiet: bool = False, **payload: Any) -> RestResponse:
+    async def patch(self, path: str, /, *, quiet: bool | None = None, **payload: Any) -> RestResponse:
         """Make a PATCH API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param payload: JSON payload
         """
         return await self._request("PATCH", path, json=payload, quiet=quiet)
 
-    async def options(self, path: str, /, *, quiet: bool = False, **query_params: Any) -> RestResponse:
+    async def options(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
         """Make an OPTIONS API request
 
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param query_params: Query parameters
         """
         return await self._request("OPTIONS", path, params=query_params, quiet=quiet)
@@ -277,13 +297,14 @@ class AsyncRestClient(RestClientBase):
     @inject_hooks
     @manage_content_type
     async def stream(
-        self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any
+        self, method: str, path: str, /, *, quiet: bool | None = None, **raw_options: Any
     ) -> AsyncGenerator[RestResponse]:
         """Stream an HTTP API request
 
         :param method: Endpoint method
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         async with self.client.stream(method.upper(), path, **raw_options) as r:
@@ -291,12 +312,15 @@ class AsyncRestClient(RestClientBase):
 
     @inject_hooks
     @manage_content_type
-    async def _request(self, method: str, path: str, /, *, quiet: bool = False, **raw_options: Any) -> RestResponse:
+    async def _request(
+        self, method: str, path: str, /, *, quiet: bool | None = None, **raw_options: Any
+    ) -> RestResponse:
         """Low-level function for all HTTP verb methods
 
         :param method: HTTP method
         :param path: Endpoint path
-        :param quiet: A flag to suppress API request/response log
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
         :param raw_options: Any other parameters passed directly to the httpx library
         """
         r = await self.client.request(method.upper(), path, **raw_options)

@@ -144,6 +144,21 @@ def get_response_reason(response: Response) -> str:
             return ""
 
 
+def format_request_failure(response: Response | RestResponse) -> str:
+    """Return a one-line summary of a failed request.
+
+    :param response: The failed response
+    """
+    if isinstance(response, RestResponse):
+        response = response._response
+
+    request = response.request
+    status = str(response.status_code)
+    if reason := get_response_reason(response):
+        status += f" {reason}"
+    return f"{request.method.upper()} {request.url!s} - {status} (request_id: {request.request_id})"
+
+
 def is_connection_reset(exc: BaseException) -> bool:
     """Return True if `exc` or any chained exception represents a TCP connection-reset by peer.
 

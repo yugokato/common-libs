@@ -15,6 +15,7 @@ from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
 from .utils import (
+    format_request_failure,
     get_response_reason,
     get_response_time,
     mask_sensitive_headers,
@@ -41,15 +42,22 @@ def inject_hooks(f: Callable[Concatenate[ClientType, P], R]) -> Callable[Concate
     @wraps(f)
     def wrapper(self: ClientType, *args: P.args, **kwargs: P.kwargs) -> R:
         assert isinstance(kwargs, dict)  # for making mypy happy
-        quiet = kwargs.pop("quiet", False)
+        quiet = kwargs.pop("quiet", None)
         kwargs.setdefault("extensions", {}).update(hooks=get_hooks(self, quiet))
         return f(self, *args, **kwargs)
 
     return wrapper
 
 
-def get_hooks(rest_client: ClientType, quiet: bool) -> dict[str, list[Callable[..., Any]]]:
-    """Get request/response hooks, cached per client instance and `quiet` flag"""
+def get_hooks(rest_client: ClientType, quiet: bool | None) -> dict[str, list[Callable[..., Any]]]:
+    """Get request/response hooks, cached per client instance and `quiet` flag
+
+    `quiet=None` (not given) defers to the client's own `log_requests` default. An explicit `quiet=False`
+    overrides `log_requests=False` for this call, the only way to get hooks back on such a client.
+    """
+    if not rest_client.log_requests and quiet is not False:
+        return {}
+    quiet = bool(quiet)
     if quiet not in rest_client._hooks_cache:
         async_mode = rest_client.async_mode
         rest_client._hooks_cache[quiet] = {
@@ -75,7 +83,8 @@ def response_hooks(response: Response, quiet: bool, rest_client: ClientType) -> 
     else:
         processed_resp = process_response(response, prettify=rest_client.prettify_response_log)
     _log_response(response, quiet, rest_client, processed_resp)
-    _print_api_summary(response, quiet, rest_client, processed_resp)
+    if not quiet:
+        _print_api_summary(response, rest_client, processed_resp)
 
 
 def _log_request(request: Request, quiet: bool) -> None:
@@ -115,11 +124,10 @@ def _log_response(response: Response, quiet: bool, rest_client: ClientType, proc
         if not quiet:
             logger.info(msg, extra=log_data)
     else:
-        # Log response regardless of the "quiet" value
-        logger.error(msg, extra=log_data)
+        logger.error(format_request_failure(response) if quiet else msg, extra=log_data)
 
 
-def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
+def _print_api_summary(response: Response, rest_client: ClientType, processed_resp: JSONType) -> None:
     """Print API request/response summary to the console"""
     # The console summary is a human-facing view of INFO-level request/response activity. Render it only when a
     # downstream has opted into logging (`setup_logging` raises the `common_libs` logger to INFO). By default the
@@ -127,7 +135,7 @@ def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType,
     if not logger.isEnabledFor(logging.INFO):
         return
 
-    log_headers = rest_client.log_headers and not quiet
+    log_headers = rest_client.log_headers
     request: Request = response.request
     bullet = "-"
     summary = ""
@@ -185,7 +193,7 @@ def _print_api_summary(response: Response, quiet: bool, rest_client: ClientType,
         )
 
     # response time
-    if not quiet and not response.is_stream:
+    if not response.is_stream:
         summary += color(f"{bullet} response_time: {response.elapsed.total_seconds()}s\n", color_code=ColorCodes.CYAN)
 
     sys.stdout.write(summary)

@@ -12,6 +12,7 @@ class TestRestClientBase:
         client = RestClientBase("http://example.com")
         assert client.async_mode is False
         assert isinstance(client.client, SyncHTTPClient)
+        assert client.log_requests is True
         assert client.log_headers is False
         assert client.prettify_response_log is True
 
@@ -22,8 +23,9 @@ class TestRestClientBase:
         assert isinstance(client.client, AsyncHTTPClient)
 
     def test_init_custom_options(self) -> None:
-        """Test initialization with custom log_headers and prettify options"""
-        client = RestClientBase("http://example.com", log_headers=True, prettify_response_log=False)
+        """Test initialization with custom log_requests, log_headers, and prettify options"""
+        client = RestClientBase("http://example.com", log_requests=False, log_headers=True, prettify_response_log=False)
+        assert client.log_requests is False
         assert client.log_headers is True
         assert client.prettify_response_log is False
 

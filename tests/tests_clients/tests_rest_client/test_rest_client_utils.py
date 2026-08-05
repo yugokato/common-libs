@@ -14,6 +14,7 @@ from common_libs.clients.rest_client.rest_client import AsyncRestClient
 from common_libs.clients.rest_client.types import RestResponse
 from common_libs.clients.rest_client.utils import (
     TRUNCATE_LEN,
+    format_request_failure,
     get_response_reason,
     get_supported_request_parameters,
     is_connection_reset,
@@ -324,6 +325,26 @@ class TestGetResponseReason:
         mock_response.status_code = 999
         result = get_response_reason(mock_response)
         assert result == ""
+
+
+class TestFormatRequestFailure:
+    """Tests for format_request_failure function"""
+
+    def test_includes_method_url_status_and_request_id(self, mocker: MockFixture) -> None:
+        """Test that the formatted summary includes the method, url, status, reason, and request_id"""
+        mock_response = mocker.MagicMock()
+        mock_response.status_code = 400
+        mock_response.reason_phrase = "Bad Request"
+        mock_response.request.method = "POST"
+        mock_response.request.url = "https://example.com/api/auth/login"
+        mock_response.request.request_id = "7f3a2c91"
+
+        result = format_request_failure(mock_response)
+
+        assert (
+            result == f"{mock_response.request.method} {mock_response.request.url} - {mock_response.status_code} "
+            f"{mock_response.reason_phrase} (request_id: {mock_response.request.request_id})"
+        )
 
 
 class TestProcessResponse:

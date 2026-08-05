@@ -21,6 +21,7 @@ class RestClientBase:
         base_url: str,
         /,
         *,
+        log_requests: bool = True,
         log_headers: bool = False,
         prettify_response_log: bool = True,
         async_mode: bool = False,
@@ -31,6 +32,9 @@ class RestClientBase:
     ) -> None:
         """
         :param base_url: API base url
+        :param log_requests: Log each request/response. Set to `False` to disable them entirely, including failed call
+                             logs. Per-call `quiet` parameter can override this for the call, but `quiet=True` still
+                             logs failed calls.
         :param log_headers: Include request/response headers to the API summary logs
         :param prettify_response_log: Prettify response in the API summary logs
         :param async_mode: Use async mode
@@ -41,6 +45,7 @@ class RestClientBase:
                            disable (default). Automatic retries and reconnects also count against the budget
         :param httpx_raw_opts: Any other parameters to pass to the httpx client
         """
+        self.log_requests = log_requests
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
         self.async_mode = async_mode
