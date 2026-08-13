@@ -1,8 +1,8 @@
 from collections.abc import Callable
 from typing import Any
 
-from httpx import Timeout
-from httpx._types import TimeoutTypes
+from httpx2 import Timeout
+from httpx2._types import TimeoutTypes
 
 from common_libs.logging import get_logger
 
@@ -28,7 +28,7 @@ class RestClientBase:
         timeout: TimeoutTypes = Timeout(5.0, read=30),
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
         rate_limit: RateLimit | None = None,
-        **httpx_raw_opts: Any,
+        **client_opts: Any,
     ) -> None:
         """
         :param base_url: API base url
@@ -43,16 +43,16 @@ class RestClientBase:
                              Defaults to retrying once on HTTP 503 after 5 s for safe methods only.
         :param rate_limit: Client-side rate limit applied to all requests made through this client, or `None` to
                            disable (default). Automatic retries and reconnects also count against the budget
-        :param httpx_raw_opts: Any other parameters to pass to the httpx client
+        :param client_opts: Any other parameters to pass to the underlying `httpx2` client
         """
         self.log_requests = log_requests
         self.log_headers = log_headers
         self.prettify_response_log = prettify_response_log
         self.async_mode = async_mode
         self._hooks_cache: dict[bool, dict[str, list[Callable[..., Any]]]] = {}
-        httpx_raw_opts.setdefault("http2", True)
+        client_opts.setdefault("http2", True)
         init_opts = dict(
-            base_url=base_url, timeout=timeout, retry_policy=retry_policy, rate_limit=rate_limit, **httpx_raw_opts
+            base_url=base_url, timeout=timeout, retry_policy=retry_policy, rate_limit=rate_limit, **client_opts
         )
         if self.async_mode:
             self.client = AsyncHTTPClient(**init_opts)

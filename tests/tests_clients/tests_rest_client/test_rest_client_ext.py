@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Callable, Iterable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from httpx import TransportError
+from httpx2 import TransportError
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import RetryPolicy
@@ -52,7 +52,7 @@ class TestRequestExt:
         assert request.end_time is None
 
     def test_standard_http_attributes(self) -> None:
-        """Test that standard httpx Request attributes are accessible"""
+        """Test that standard httpx2 Request attributes are accessible"""
         url = "http://example.com/api"
         request = Request("POST", url)
         assert request.method == "POST"
@@ -606,6 +606,6 @@ class TestConnectionResetReconnect:
 
 
 async def _async_iter(items: Iterable[str | bytes]) -> AsyncIterator[str | bytes]:
-    """Build an async iterator from `items`, for mocking httpx's `aiter_*` methods"""
+    """Build an async iterator from `items`, for mocking httpx2's `aiter_*` methods"""
     for item in items:
         yield item

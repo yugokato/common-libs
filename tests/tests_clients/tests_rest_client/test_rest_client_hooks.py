@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock
 
-import httpx
+import httpx2
 import pytest
 from pytest_mock import MockFixture
 
@@ -23,10 +23,10 @@ from common_libs.clients.rest_client.utils import TRUNCATE_LEN, format_request_f
 HOOKS_LOGGER_NAME = "common_libs.clients.rest_client.hooks"
 
 
-def _not_found_handler(request: httpx.Request) -> httpx.Response:
+def _not_found_handler(request: httpx2.Request) -> httpx2.Response:
     """Serve a canned 404 response"""
-    return httpx.Response(
-        404, stream=httpx.ByteStream(b'{"error": "not found"}'), headers={"Content-Type": "application/json"}
+    return httpx2.Response(
+        404, stream=httpx2.ByteStream(b'{"error": "not found"}'), headers={"Content-Type": "application/json"}
     )
 
 
@@ -401,7 +401,7 @@ class TestLogRequestsDisabled:
             "https://example.com",
             log_requests=False,
             retry_policy=None,
-            transport=httpx.MockTransport(_not_found_handler),
+            transport=httpx2.MockTransport(_not_found_handler),
         ) as client:
             client.get("/missing")
 
@@ -421,7 +421,7 @@ class TestLogRequestsDisabled:
             "https://example.com",
             log_requests=False,
             retry_policy=None,
-            transport=httpx.MockTransport(_not_found_handler),
+            transport=httpx2.MockTransport(_not_found_handler),
         ) as client:
             client.get("/missing", quiet=True)
 
@@ -441,7 +441,7 @@ class TestLogRequestsDisabled:
             "https://example.com",
             log_requests=False,
             retry_policy=None,
-            transport=httpx.MockTransport(_not_found_handler),
+            transport=httpx2.MockTransport(_not_found_handler),
         ) as client:
             client.get("/missing", quiet=False)
 
@@ -458,7 +458,7 @@ class TestLogRequestsDisabled:
         mocker.patch("sys.stdout.flush")
 
         with RestClient(
-            "https://example.com", retry_policy=None, transport=httpx.MockTransport(_not_found_handler)
+            "https://example.com", retry_policy=None, transport=httpx2.MockTransport(_not_found_handler)
         ) as client:
             client.get("/missing")
 

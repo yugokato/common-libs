@@ -3,7 +3,7 @@ from collections import deque
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
+import httpx2
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.h3.connection import H3Connection
 from aioquic.h3.events import DataReceived, H3Event, Headers, HeadersReceived
@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 # https://github.com/aiortc/aioquic/blob/6d36838d008c2202c337142fa07e8bf80e96bac8/examples/httpx_client.py
 
 
-class H3ResponseStream(httpx.AsyncByteStream):
+class H3ResponseStream(httpx2.AsyncByteStream):
     """Async byte stream wrapping an async iterator for HTTP/3 response bodies."""
 
     def __init__(self, aiterator: AsyncIterator[bytes]) -> None:
@@ -27,8 +27,8 @@ class H3ResponseStream(httpx.AsyncByteStream):
             yield part
 
 
-class H3Transport(QuicConnectionProtocol, httpx.AsyncBaseTransport):
-    """httpx async transport that sends requests over an HTTP/3 (QUIC) connection."""
+class H3Transport(QuicConnectionProtocol, httpx2.AsyncBaseTransport):
+    """httpx2 async transport that sends requests over an HTTP/3 (QUIC) connection."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -45,12 +45,12 @@ class H3Transport(QuicConnectionProtocol, httpx.AsyncBaseTransport):
         self._read_queue.pop(stream_id, None)
         self._read_ready.pop(stream_id, None)
 
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
         """Send an HTTP/3 request and return the response.
 
-        :param request: The httpx request to send.
+        :param request: The httpx2 request to send.
         """
-        assert isinstance(request.stream, httpx.AsyncByteStream)
+        assert isinstance(request.stream, httpx2.AsyncByteStream)
 
         stream_id = self._quic.get_next_available_stream_id()
         self._read_queue[stream_id] = deque()
@@ -77,7 +77,7 @@ class H3Transport(QuicConnectionProtocol, httpx.AsyncBaseTransport):
         # process response
         status_code, headers, stream_ended = await self._receive_response(stream_id)
 
-        return httpx.Response(
+        return httpx2.Response(
             status_code=status_code,
             headers=headers,
             stream=H3ResponseStream(self._receive_response_data_with_cleanup(stream_id, stream_ended)),

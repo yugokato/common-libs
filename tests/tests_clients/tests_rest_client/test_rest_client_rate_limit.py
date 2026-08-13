@@ -3,7 +3,7 @@
 import json
 import time
 
-import httpx
+import httpx2
 import pytest
 from pytest_mock import MockFixture
 
@@ -14,7 +14,7 @@ from common_libs.clients.rest_client.retry import RetryPolicy
 BASE_URL = "https://example.com"
 
 
-def make_json_response(status_code: int, data: dict[str, object]) -> httpx.Response:
+def make_json_response(status_code: int, data: dict[str, object]) -> httpx2.Response:
     """Build a stream-backed JSON response for a MockTransport handler
 
     Unlike passing `json=` (preloaded content), a stream-backed response is read by the client after the
@@ -23,14 +23,14 @@ def make_json_response(status_code: int, data: dict[str, object]) -> httpx.Respo
     :param status_code: HTTP status code
     :param data: JSON body
     """
-    return httpx.Response(
+    return httpx2.Response(
         status_code,
-        stream=httpx.ByteStream(json.dumps(data).encode()),
+        stream=httpx2.ByteStream(json.dumps(data).encode()),
         headers={"Content-Type": "application/json"},
     )
 
 
-def ok_handler(request: httpx.Request) -> httpx.Response:
+def ok_handler(request: httpx2.Request) -> httpx2.Response:
     """Serve a canned 200 response"""
     return make_json_response(200, {"ok": True})
 
@@ -114,7 +114,7 @@ class TestRestClientRateLimiting:
             BASE_URL,
             retry_policy=None,
             rate_limit=RateLimit(2, interval=0.2),
-            transport=httpx.MockTransport(ok_handler),
+            transport=httpx2.MockTransport(ok_handler),
         ) as client:
             start = time.monotonic()
             for _ in range(4):
@@ -130,7 +130,7 @@ class TestRestClientRateLimiting:
             BASE_URL,
             retry_policy=None,
             rate_limit=RateLimit(10, interval=1.0),
-            transport=httpx.MockTransport(ok_handler),
+            transport=httpx2.MockTransport(ok_handler),
         ) as client:
             start = time.monotonic()
             for _ in range(3):
@@ -145,7 +145,7 @@ class TestRestClientRateLimiting:
             BASE_URL,
             retry_policy=None,
             rate_limit=RateLimit(2, interval=0.2),
-            transport=httpx.MockTransport(ok_handler),
+            transport=httpx2.MockTransport(ok_handler),
         ) as client:
             start = time.monotonic()
             for _ in range(4):
@@ -158,7 +158,7 @@ class TestRestClientRateLimiting:
         """Test that automatic retries also pass the rate limiter"""
         num_requests = 0
 
-        def flaky_handler(request: httpx.Request) -> httpx.Response:
+        def flaky_handler(request: httpx2.Request) -> httpx2.Response:
             nonlocal num_requests
             num_requests += 1
             if num_requests < 3:
@@ -169,7 +169,7 @@ class TestRestClientRateLimiting:
             BASE_URL,
             retry_policy=RetryPolicy(condition=503, num_retries=2, retry_after=0),
             rate_limit=RateLimit(1, interval=0.15),
-            transport=httpx.MockTransport(flaky_handler),
+            transport=httpx2.MockTransport(flaky_handler),
         ) as client:
             start = time.monotonic()
             r = client.get("/api", quiet=True)

@@ -7,7 +7,7 @@ from email.utils import format_datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
+import httpx2
 import pytest
 from pytest import FixtureRequest
 from pytest_mock import MockFixture
@@ -147,9 +147,9 @@ class TestBackoffStrategyJitterAndFallback:
         assert strategy.delay(0, response) == pytest.approx(1.0)
 
     def test_honor_retry_after_reads_header_from_raw_httpx_response(self) -> None:
-        """Test that delay reads Retry-After from a raw httpx Response (the production path through ext.py)"""
+        """Test that delay reads Retry-After from a raw httpx2 Response (the production path through ext.py)"""
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
-        raw = httpx.Response(503, headers={"Retry-After": "45"}, request=httpx.Request("GET", "http://x"))
+        raw = httpx2.Response(503, headers={"Retry-After": "45"}, request=httpx2.Request("GET", "http://x"))
         assert strategy.delay(0, raw) == pytest.approx(45.0)
 
     def test_retry_after_header_not_capped_by_max_delay(self, mocker: MockFixture) -> None:
@@ -164,7 +164,7 @@ class TestBackoffStrategyJitterAndFallback:
         self, mocker: MockFixture, mock_response_factory: Callable[..., MagicMock]
     ) -> None:
         """Test that retry_on honors the `Retry-After` header end-to-end when `retry_after` is a
-        `BackoffStrategy` and the wrapped function returns a raw httpx `Response`."""
+        `BackoffStrategy` and the wrapped function returns a raw httpx2 `Response`."""
         sleep_mock = mocker.patch("time.sleep")
         strategy = BackoffStrategy(base=1.0, factor=2.0, jitter=False, honor_retry_after=True)
         mock_err = mock_response_factory(503)
@@ -380,7 +380,7 @@ class TestRetryOn:
     async def test_retried_response_chains_retried_attribute(self, mode: str) -> None:
         """Test that after a retry, the successful response's request.retried is a snapshot of the
         failed-attempt request."""
-        shared_request = cast(Request, httpx.Request("GET", "http://example.com/api"))
+        shared_request = cast(Request, httpx2.Request("GET", "http://example.com/api"))
         shared_request.request_id = "test-request-id"
         shared_request.start_time = None
         shared_request.end_time = None
@@ -408,7 +408,7 @@ class TestRetryOn:
 
     async def test_retried_response_chains_retried_attribute_over_multiple_retries(self, mode: str) -> None:
         """Test that request.retried chains correctly across multiple retry attempts."""
-        shared_request = cast(Request, httpx.Request("GET", "http://example.com/api"))
+        shared_request = cast(Request, httpx2.Request("GET", "http://example.com/api"))
         shared_request.request_id = "test-request-id"
         shared_request.start_time = None
         shared_request.end_time = None
@@ -444,7 +444,7 @@ class TestRetryOn:
     async def test_snapshot_preserves_timestamps_from_failed_attempt(self, mode: str) -> None:
         """Test that request.retried freezes the failed attempt's start_time and end_time independently
         of the live request object, which is reused and overwritten on the next retry."""
-        shared_request = cast(Request, httpx.Request("GET", "http://example.com/api"))
+        shared_request = cast(Request, httpx2.Request("GET", "http://example.com/api"))
         shared_request.request_id = "test-request-id"
         shared_request.retried = None
 
@@ -484,7 +484,7 @@ class TestRetryOn:
     ) -> None:
         """Test that after a retry following an exception, the successful response's request.retried
         is a snapshot of the failed-attempt request."""
-        original_request = cast(Request, httpx.Request("GET", "http://example.com/api"))
+        original_request = cast(Request, httpx2.Request("GET", "http://example.com/api"))
         original_request.request_id = "test-request-id"
         original_request.start_time = None
         original_request.end_time = None
@@ -512,7 +512,7 @@ class TestRetryOn:
     async def test_retried_response_chains_retried_attribute_when_retries_exhausted(self, mode: str) -> None:
         """Test that the final failing response's request.retried is a snapshot of the prior attempt,
         not the live request object, when all retries are exhausted."""
-        shared_request = cast(Request, httpx.Request("GET", "http://example.com/api"))
+        shared_request = cast(Request, httpx2.Request("GET", "http://example.com/api"))
         shared_request.request_id = "test-request-id"
         shared_request.start_time = None
         shared_request.end_time = None

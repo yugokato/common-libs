@@ -56,7 +56,7 @@ redis-client = [
     "redis>=6.2.0",
 ]
 rest-client = [
-    "httpx[http2]>=0.28.0",
+    "httpx2[http2]>=2.10.0,<3",
 ]
 client = [
     "common-libs[postgresql-client,redis-client,rest-client]",

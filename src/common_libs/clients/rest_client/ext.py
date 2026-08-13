@@ -7,9 +7,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from httpx import AsyncClient, TimeoutException, TransportError
-from httpx import Client as SyncClient
-from httpx._auth import Auth
+from httpx2 import AsyncClient, Auth, TimeoutException, TransportError
+from httpx2 import Client as SyncClient
 
 from common_libs.logging import get_logger
 
@@ -31,7 +30,7 @@ class BearerAuth(Auth):
 
 
 class HTTPClientMixin:
-    """Shared mixin for sync and async httpx clients"""
+    """Shared mixin for sync and async httpx2 clients"""
 
     _request_id_header = "X-Request-ID"
 
@@ -46,8 +45,8 @@ class HTTPClientMixin:
 
         :param retry_policy: Retry policy controlling automatic retry behavior, or `None` to disable retries.
         :param rate_limit: Client-side rate limit enforced on every request attempt, or `None` to disable.
-        :param args: Positional arguments forwarded to the underlying httpx client.
-        :param kwargs: Keyword arguments forwarded to the underlying httpx client.
+        :param args: Positional arguments forwarded to the underlying httpx2 client.
+        :param kwargs: Keyword arguments forwarded to the underlying httpx2 client.
         """
         self._retry_decorator: Any = (
             retry_on(
@@ -159,10 +158,10 @@ class HTTPClientMixin:
 
 
 class SyncHTTPClient(HTTPClientMixin, SyncClient):
-    """Sync HTTP client that extends httpx.Client"""
+    """Sync HTTP client that extends httpx2.Client"""
 
     def send(self, request: Request, **kwargs: Any) -> Response:
-        """Add following behaviors to httpx's client.send()
+        """Add following behaviors to httpx2's client.send()
 
         - Set X-Request-ID header
         - Apply the client-side rate limit per attempt (when configured)
@@ -204,10 +203,10 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
 
 
 class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
-    """Async HTTP client that extends httpx.AsyncClient"""
+    """Async HTTP client that extends httpx2.AsyncClient"""
 
     async def send(self, request: Request, **kwargs: Any) -> Response:
-        """Add following behaviors to httpx's async client.send()
+        """Add following behaviors to httpx2's async client.send()
 
         - Set X-Request-ID header
         - Apply the client-side rate limit per attempt (when configured)

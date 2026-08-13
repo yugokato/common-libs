@@ -6,8 +6,8 @@ from datetime import datetime
 from functools import partial
 from typing import Any, Literal, TypeAlias
 
-from httpx import Request as _Request
-from httpx import Response as _Response
+from httpx2 import Request as _Request
+from httpx2 import Response as _Response
 
 JSONType: TypeAlias = str | int | float | bool | list["JSONType"] | dict[str, "JSONType"] | None
 
@@ -16,9 +16,11 @@ _STREAM_MODES: tuple[StreamMode, ...] = ("text", "bytes", "line", "raw")
 
 
 class Request(_Request):
-    """Extended httpx Request for type checking only.
+    """Extended httpx2 Request for type checking only.
 
-    Attributes are monkey-patched onto httpx.Request object when building a request.
+    Attributes are monkey-patched onto httpx2.Request object when building a request. `isinstance()` checks
+    against this class are always `False` for objects the client produces, since those remain plain
+    `httpx2.Request` instances.
     """
 
     request_id: str
@@ -28,9 +30,11 @@ class Request(_Request):
 
 
 class Response(_Response):
-    """Extended httpx Response for type checking only.
+    """Extended httpx2 Response for type checking only.
 
-    Attributes are monkey-patched onto httpx.Response object when building a response.
+    Attributes are monkey-patched onto httpx2.Response object when building a response. `isinstance()` checks
+    against this class are always `False` for objects the client produces, since those remain plain
+    `httpx2.Response` instances.
     """
 
     request: Request
@@ -39,9 +43,9 @@ class Response(_Response):
 
 @dataclass(frozen=True)
 class RestResponse:
-    """Response class that wraps the httpx Response object"""
+    """Response class that wraps the httpx2 Response object"""
 
-    # raw response returned from httpx lib
+    # raw response returned from httpx2 lib
     _response: Response
 
     request_id: str = field(init=False)
@@ -73,7 +77,7 @@ class RestResponse:
         self._response.raise_for_status()
 
     def stream(self, mode: StreamMode = "text", chunk_size: int | None = None) -> Iterator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions
+        """Shortcut to various httpx2's response iteration functions
 
         :param mode: The streaming mode: `text`, `bytes`, `line`, or `raw`.
         :param chunk_size: The size of each chunk to read. Not supported for `line` mode.
@@ -88,7 +92,7 @@ class RestResponse:
         return funcs[mode]()
 
     def astream(self, mode: StreamMode = "text", chunk_size: int | None = None) -> AsyncIterator[str | bytes]:
-        """Shortcut to various httpx's response iteration functions (for async)
+        """Shortcut to various httpx2's response iteration functions (for async)
 
         :param mode: The streaming mode: `text`, `bytes`, `line`, or `raw`.
         :param chunk_size: The size of each chunk to read. Not supported for `line` mode.

@@ -32,7 +32,7 @@ class RestClient(RestClientBase):
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
         rate_limit: RateLimit | None = None,
-        **httpx_raw_opts: Any,
+        **client_opts: Any,
     ) -> None:
         try:
             asyncio.get_running_loop()
@@ -49,7 +49,7 @@ class RestClient(RestClientBase):
             prettify_response_log=prettify_response_log,
             retry_policy=retry_policy,
             rate_limit=rate_limit,
-            **httpx_raw_opts,
+            **client_opts,
         )
 
     def __enter__(self) -> Self:
@@ -59,7 +59,7 @@ class RestClient(RestClientBase):
         self.close()
 
     def close(self) -> None:
-        """Close the underlying httpx client"""
+        """Close the underlying httpx2 client"""
         self.client.close()
 
     def get(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
@@ -139,7 +139,7 @@ class RestClient(RestClientBase):
         :param path: Endpoint path
         :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
                       Overrides the client's own `log_requests` default when given explicitly
-        :param raw_options: Any other parameters passed directly to the httpx library
+        :param raw_options: Any other parameters passed directly to the httpx2 library
         """
         with self.client.stream(method.upper(), path, **raw_options) as r:
             yield RestResponse(r)
@@ -153,7 +153,7 @@ class RestClient(RestClientBase):
         :param path: Endpoint path
         :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
                       Overrides the client's own `log_requests` default when given explicitly
-        :param raw_options: Any other parameters passed directly to the httpx library
+        :param raw_options: Any other parameters passed directly to the httpx2 library
         """
         r = self.client.request(method.upper(), path, **raw_options)
         return RestResponse(r)
@@ -171,7 +171,7 @@ class AsyncRestClient(RestClientBase):
         prettify_response_log: bool = True,
         retry_policy: RetryPolicy | None = DEFAULT_RETRY_POLICY,
         rate_limit: RateLimit | None = None,
-        **kwargs: Any,
+        **client_opts: Any,
     ) -> None:
         super().__init__(
             base_url,
@@ -181,7 +181,7 @@ class AsyncRestClient(RestClientBase):
             async_mode=True,
             retry_policy=retry_policy,
             rate_limit=rate_limit,
-            **kwargs,
+            **client_opts,
         )
 
     @classmethod
@@ -189,7 +189,7 @@ class AsyncRestClient(RestClientBase):
     async def http3(cls, base_url: str, **kwargs: Any) -> AsyncGenerator[AsyncRestClient]:
         """Async context manager that yields an AsyncRestClient connected over HTTP/3.
 
-        This is experimental/temporary until the official HTTP/3 support is added to httpx
+        This is experimental/temporary until the official HTTP/3 support is added to httpx2
 
         :param base_url: Base URL of the API (must use the https scheme).
         :param kwargs: Additional keyword arguments forwarded to AsyncRestClient
@@ -225,7 +225,7 @@ class AsyncRestClient(RestClientBase):
         await self.close()
 
     async def close(self) -> None:
-        """Close the underlying httpx client"""
+        """Close the underlying httpx2 client"""
         await self.client.aclose()
 
     async def get(self, path: str, /, *, quiet: bool | None = None, **query_params: Any) -> RestResponse:
@@ -305,7 +305,7 @@ class AsyncRestClient(RestClientBase):
         :param path: Endpoint path
         :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
                       Overrides the client's own `log_requests` default when given explicitly
-        :param raw_options: Any other parameters passed directly to the httpx library
+        :param raw_options: Any other parameters passed directly to the httpx2 library
         """
         async with self.client.stream(method.upper(), path, **raw_options) as r:
             yield RestResponse(r)
@@ -321,7 +321,7 @@ class AsyncRestClient(RestClientBase):
         :param path: Endpoint path
         :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
                       Overrides the client's own `log_requests` default when given explicitly
-        :param raw_options: Any other parameters passed directly to the httpx library
+        :param raw_options: Any other parameters passed directly to the httpx2 library
         """
         r = await self.client.request(method.upper(), path, **raw_options)
         return RestResponse(r)

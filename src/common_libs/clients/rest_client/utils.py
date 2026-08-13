@@ -10,7 +10,7 @@ from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 from urllib.parse import parse_qs, urlparse
 
-from httpx import Client
+from httpx2 import Client
 
 from common_libs.logging import get_logger
 
@@ -200,9 +200,9 @@ def manage_content_type(f: Callable[Concatenate[ClientType, P], T]) -> Callable[
 @lru_cache
 def get_supported_request_parameters() -> list[str]:
     """Return a list of supported request parameters"""
-    custom_parameters = ["quiet"]
-    requests_lib_params = inspect.signature(Client.request).parameters
-    return [k for k, v in requests_lib_params.items() if v.default is not v.empty] + custom_parameters
+    custom_params = ["quiet"]
+    client_params = inspect.signature(Client.request).parameters
+    return [k for k, v in client_params.items() if v.default is not v.empty] + custom_params
 
 
 def set_request_to_exception(exc: BaseException, request: Request) -> None:

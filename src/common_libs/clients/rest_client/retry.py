@@ -124,7 +124,7 @@ def retry_on(
     :param condition: Status code(s), exception class(es), or a callable taking the response or exception to retry on.
                       A sequence may contain status codes, exception classes, or a mix of both.
                       When a callable is passed, it receives the value returned by the wrapped function on
-                      HTTP-level retries (a raw `httpx.Response` when wrapping `RestClient`/`AsyncRestClient`),
+                      HTTP-level retries (a raw `httpx2.Response` when wrapping `RestClient`/`AsyncRestClient`),
                       or the raised exception when an exception-based retry occurs; the callable must handle both
                       cases gracefully. When evaluated against a response, the callable must not raise — errors
                       are not caught.

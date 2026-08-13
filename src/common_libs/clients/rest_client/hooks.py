@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 
-from httpx import Request, Response
+from httpx2 import Request, Response
 
 from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
