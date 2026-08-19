@@ -110,14 +110,19 @@ class HTTPClientMixin:
             request.end_time = datetime.now(tz=UTC)
 
     def _modify_request(self, request: Request) -> Request:
-        request_id = request.headers.get(self._request_id_header)
-        if not request_id:
-            request_id = str(uuid.uuid4())
-            request.headers[self._request_id_header] = request_id
-        request.request_id = request_id
-        request.start_time = None
-        request.end_time = None
-        request.retried = None
+        """Stamp the client's own attributes on a request that does not already carry them
+
+        :param request: The request to stamp.
+        """
+        if not hasattr(request, "request_id"):
+            request_id = request.headers.get(self._request_id_header)
+            if not request_id:
+                request_id = str(uuid.uuid4())
+                request.headers[self._request_id_header] = request_id
+            request.request_id = request_id
+        for attr in ("start_time", "end_time", "retried"):
+            if not hasattr(request, attr):
+                setattr(request, attr, None)
         return request
 
     def _modify_response(self, response: Response) -> Response:
@@ -170,6 +175,7 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
         - Retry on the configured policy (default: 503)
         - Log exceptions
         """
+        self._modify_request(request)
         log_data = self._build_log_data(request)
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
@@ -201,6 +207,16 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
         self.call_response_hooks(resp)
         return resp
 
+    def _send_single_request(self, request: Request) -> Response:
+        """Stamp `request` before it goes on the wire
+
+        The one dispatch point every request reaches, including one an auth flow built from scratch rather
+        than passing through `send()`.
+
+        :param request: The request about to be sent.
+        """
+        return cast(Response, super()._send_single_request(self._modify_request(request)))
+
 
 class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
     """Async HTTP client that extends httpx2.AsyncClient"""
@@ -215,6 +231,7 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
         - Retry on the configured policy (default: 503)
         - Log exceptions
         """
+        self._modify_request(request)
         log_data = self._build_log_data(request)
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
@@ -245,3 +262,13 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
         self._modify_response(resp)
         await self.acall_response_hooks(resp)
         return resp
+
+    async def _send_single_request(self, request: Request) -> Response:
+        """Stamp `request` before it goes on the wire
+
+        The one dispatch point every request reaches, including one an auth flow built from scratch rather
+        than passing through `send()`.
+
+        :param request: The request about to be sent.
+        """
+        return cast(Response, await super()._send_single_request(self._modify_request(request)))

@@ -2,17 +2,22 @@
 
 import errno
 from collections.abc import AsyncIterator, Callable, Iterable
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx2
 import pytest
 from httpx2 import TransportError
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import RetryPolicy
 from common_libs.clients.rest_client.ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
+from common_libs.clients.rest_client.rest_client import AsyncRestClient, RestClient
 from common_libs.clients.rest_client.retry import BackoffStrategy
 from common_libs.clients.rest_client.types import Request, RestResponse
 from common_libs.clients.rest_client.utils import get_request_from_exception
+
+BASE_URL = "http://example.com"
 
 
 class TestBearerAuth:
@@ -57,6 +62,23 @@ class TestRequestExt:
         request = Request("POST", url)
         assert request.method == "POST"
         assert str(request.url) == url
+
+    def test_modify_request_only_fills_in_missing_attributes(self) -> None:
+        """Test that _modify_request leaves an attribute a caller already set untouched, and only fills in the
+        ones still missing
+        """
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = Request("GET", "http://example.com/")
+        request.request_id = "existing-id"
+        request.start_time = datetime.now(tz=UTC)
+
+        client._modify_request(request)
+
+        assert request.request_id == "existing-id"
+        assert "X-Request-ID" not in request.headers
+        assert request.start_time is not None
+        assert request.end_time is None
+        assert request.retried is None
 
 
 class TestRestResponse:
@@ -330,6 +352,44 @@ class TestSyncHTTPClient:
 
         assert get_request_from_exception(exc_info.value) is request
 
+    def test_send_stamps_a_request_never_built_by_this_client(self, mocker: MockFixture) -> None:
+        """Test that send() stamps request_id and the X-Request-ID header on a request built outside the
+        client (e.g. a plain httpx2.Request handed straight to send())
+        """
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = Request("GET", "http://example.com/")
+        mocker.patch.object(client, "_send", return_value=mocker.MagicMock())
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        client.send(request)
+
+        assert request.request_id
+        assert request.headers["X-Request-ID"] == request.request_id
+
+    def test_send_reuses_a_caller_supplied_request_id_header(self, mocker: MockFixture) -> None:
+        """Test that send() reuses a caller-supplied X-Request-ID header rather than replacing it"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = Request("GET", "http://example.com/", headers={"X-Request-ID": "caller-id"})
+        mocker.patch.object(client, "_send", return_value=mocker.MagicMock())
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        client.send(request)
+
+        assert request.request_id == "caller-id"
+        assert request.headers["X-Request-ID"] == "caller-id"
+
+    def test_send_does_not_replace_an_already_stamped_request_id(self, mocker: MockFixture) -> None:
+        """Test that send() keeps the request_id a prior build_request() call already stamped"""
+        client = SyncHTTPClient(base_url="http://example.com")
+        request = client.build_request("GET", "/users")
+        original_id = request.request_id
+        mocker.patch.object(client, "_send", return_value=mocker.MagicMock())
+        mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+        client.send(request)
+
+        assert request.request_id == original_id
+
     def test_retry_none_disables_503_retry(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
     ) -> None:
@@ -439,6 +499,44 @@ class TestAsyncHTTPClient:
                 await client.send(request)
 
         assert get_request_from_exception(exc_info.value) is request
+
+    async def test_send_stamps_a_request_never_built_by_this_client(self, mocker: MockFixture) -> None:
+        """Test that send() stamps request_id and the X-Request-ID header on a request built outside the
+        client (e.g. a plain httpx2.Request handed straight to send())
+        """
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = Request("GET", "http://example.com/")
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, return_value=mocker.MagicMock())
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            await client.send(request)
+
+        assert request.request_id
+        assert request.headers["X-Request-ID"] == request.request_id
+
+    async def test_send_reuses_a_caller_supplied_request_id_header(self, mocker: MockFixture) -> None:
+        """Test that send() reuses a caller-supplied X-Request-ID header rather than replacing it"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = Request("GET", "http://example.com/", headers={"X-Request-ID": "caller-id"})
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, return_value=mocker.MagicMock())
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            await client.send(request)
+
+        assert request.request_id == "caller-id"
+        assert request.headers["X-Request-ID"] == "caller-id"
+
+    async def test_send_does_not_replace_an_already_stamped_request_id(self, mocker: MockFixture) -> None:
+        """Test that send() keeps the request_id a prior build_request() call already stamped"""
+        async with AsyncHTTPClient(base_url="http://example.com") as client:
+            request = client.build_request("GET", "/users")
+            original_id = request.request_id
+            mocker.patch.object(client, "_send", new_callable=AsyncMock, return_value=mocker.MagicMock())
+            mocker.patch("common_libs.clients.rest_client.ext.logger")
+
+            await client.send(request)
+
+        assert request.request_id == original_id
 
     async def test_retry_none_disables_503_retry(
         self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture
@@ -603,6 +701,118 @@ class TestConnectionResetReconnect:
                 await client.send(request)
 
         assert send_mock.call_count == 1
+
+
+def _mock_response(status_code: int, headers: dict[str, str] | None = None) -> httpx2.Response:
+    """Build a stream-backed httpx2.Response for a MockTransport handler
+
+    A response built with no explicit `stream=` never gets its `.elapsed` populated, since that comes from
+    the bound stream `Client.send()` reads. A real network response is always stream-backed, so this is what
+    a handler needs to return for the client's own response-time logging to work.
+
+    :param status_code: HTTP status code.
+    :param headers: Response headers, e.g. `Location` for a redirect.
+    """
+    return httpx2.Response(status_code, stream=httpx2.ByteStream(b"{}"), headers=headers)
+
+
+class TestRequestIdAcrossDispatch:
+    """Tests that request_id survives the dispatch paths beyond a single top-level send(): redirects, retries,
+    and a request an auth flow builds from scratch
+    """
+
+    def test_redirect_reuses_the_original_request_id(self) -> None:
+        """Test that a redirect hop is dispatched with the same request_id as the request that received it"""
+        seen_request_ids: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen_request_ids.append(request.headers["X-Request-ID"])
+            if request.url.path == "/old":
+                return _mock_response(302, headers={"Location": "/new"})
+            return _mock_response(200)
+
+        with RestClient(
+            BASE_URL, retry_policy=None, follow_redirects=True, transport=httpx2.MockTransport(handler)
+        ) as client:
+            r = client.get("/old")
+
+        assert len(seen_request_ids) == 2
+        assert seen_request_ids[0] == seen_request_ids[1]
+        assert r.request_id == seen_request_ids[1]
+
+    def test_retry_chains_the_failed_attempts_request_id(self) -> None:
+        """Test that a retried request's `retried` snapshot preserves the failed attempt's request_id"""
+        call_count = 0
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            nonlocal call_count
+            call_count += 1
+            return _mock_response(503) if call_count == 1 else _mock_response(200)
+
+        retry_policy = RetryPolicy(condition=503, retry_after=0)
+        with RestClient(BASE_URL, retry_policy=retry_policy, transport=httpx2.MockTransport(handler)) as client:
+            r = client.get("/data")
+
+        assert r.request.retried is not None
+        assert r.request.retried.request_id == r.request_id
+
+    def test_a_request_an_auth_flow_builds_from_scratch_still_gets_a_request_id(self) -> None:
+        """Test that a request a custom auth callable constructs anew, rather than mutating the one it was
+        given, still reaches the wire with a request_id stamped on it
+        """
+
+        def replace_request(request: httpx2.Request) -> httpx2.Request:
+            return httpx2.Request(request.method, request.url)
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            assert request.headers["X-Request-ID"]
+            return _mock_response(200)
+
+        with RestClient(
+            BASE_URL, auth=replace_request, retry_policy=None, transport=httpx2.MockTransport(handler)
+        ) as client:
+            r = client.get("/data")
+
+        assert r.request.request_id
+
+    async def test_async_redirect_reuses_the_original_request_id(self) -> None:
+        """Test that a redirect hop is dispatched with the same request_id as the request that received it
+        (async)
+        """
+        seen_request_ids: list[str] = []
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            seen_request_ids.append(request.headers["X-Request-ID"])
+            if request.url.path == "/old":
+                return _mock_response(302, headers={"Location": "/new"})
+            return _mock_response(200)
+
+        async with AsyncRestClient(
+            BASE_URL, retry_policy=None, follow_redirects=True, transport=httpx2.MockTransport(handler)
+        ) as client:
+            r = await client.get("/old")
+
+        assert len(seen_request_ids) == 2
+        assert seen_request_ids[0] == seen_request_ids[1]
+        assert r.request_id == seen_request_ids[1]
+
+    async def test_async_retry_chains_the_failed_attempts_request_id(self) -> None:
+        """Test that a retried request's `retried` snapshot preserves the failed attempt's request_id (async)"""
+        call_count = 0
+
+        def handler(request: httpx2.Request) -> httpx2.Response:
+            nonlocal call_count
+            call_count += 1
+            return _mock_response(503) if call_count == 1 else _mock_response(200)
+
+        retry_policy = RetryPolicy(condition=503, retry_after=0)
+        async with AsyncRestClient(
+            BASE_URL, retry_policy=retry_policy, transport=httpx2.MockTransport(handler)
+        ) as client:
+            r = await client.get("/data")
+
+        assert r.request.retried is not None
+        assert r.request.retried.request_id == r.request_id
 
 
 async def _async_iter(items: Iterable[str | bytes]) -> AsyncIterator[str | bytes]:

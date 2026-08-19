@@ -204,8 +204,8 @@ def retry_on(
             wait_secs = resolved_retry_after(resp) if callable(resolved_retry_after) else resolved_retry_after
             msg = "Retry condition matched." if is_callable_condition else f"Received status code {resp.status_code}."
             log_extra = {"status_code": resp.status_code, "response": process_response(resp, prettify=True)}
-        if request is not None and (request_id := getattr(request, "request_id", None)) is not None:
-            log_extra["request_id"] = request_id
+        if request is not None:
+            log_extra["request_id"] = request.request_id
         return wait_secs, msg, log_extra
 
     def _log_retry(wait_secs: float | int, msg: str, log_extra: dict[str, Any]) -> None:

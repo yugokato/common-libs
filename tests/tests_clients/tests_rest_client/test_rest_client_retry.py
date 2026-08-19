@@ -661,6 +661,7 @@ class TestRetryOn:
         """Test that safe_methods_only=True allows exception retry for safe methods like GET"""
         mock_request = MagicMock(spec=Request)
         mock_request.method = "GET"
+        mock_request.request_id = "test-request-id"
         mock_ok = mock_response_factory(200)
         call_count = 0
 
