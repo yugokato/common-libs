@@ -3,14 +3,14 @@ from __future__ import annotations
 import errno
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from functools import lru_cache, wraps
 from http import HTTPStatus
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar
 from urllib.parse import parse_qs, urlparse
 
-from httpx2 import Client
+from httpx2 import URL, Client, RequestNotRead
 
 from common_libs.logging import get_logger
 
@@ -27,8 +27,26 @@ logger = get_logger(__name__)
 
 TRUNCATE_LEN = 512
 ORIGINAL_REQUEST_ATTR = "_original_request"
+REQUEST_ID_HEADER = "X-Request-ID"
+SENSITIVE_NAMES_EXTENSION = "sensitive_names"
 SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
 _SENSITIVE_FIELD_NAMES = frozenset({"password", "token", "secret", "api_key", "apikey", "api-key"})
+_SENSITIVE_QUERY_NAMES = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "apikey",
+        "api-key",
+        "auth_token",
+        "client_secret",
+        "id_token",
+        "password",
+        "refresh_token",
+        "secret",
+        "signature",
+        "token",
+    }
+)
 _SENSITIVE_HEADER_NAMES = frozenset(
     {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key", "api-key"}
 )
@@ -37,8 +55,17 @@ _SENSITIVE_HEADER_NAMES = frozenset(
 def process_request_body(
     request: Request, hide_sensitive_values: bool = True, truncate_bytes: bool = False
 ) -> str | bytes:
-    """Process request body"""
-    body = request.read()
+    """Process request body
+
+    Reads the body only when it is already buffered, e.g. a `json=`/`data=` payload, which httpx2 encodes
+    eagerly. A `files=` upload or a streamed `content=` body that has not been read yet is reported as
+    `<streaming>` instead of being forced into memory here: forcing it would defeat the point of streaming it,
+    and would make an auth `401` replay decision depend on whether request logging happened to run first.
+    """
+    try:
+        body = request.content
+    except RequestNotRead:
+        return "<streaming>"
     if body:
         body = _decode_utf8(body)
         if isinstance(body, bytes):
@@ -62,13 +89,8 @@ def mask_sensitive_value(body: Any, content_type: str) -> Any:
     """Mask a field value when a field name of the request body contains specific word"""
     if isinstance(body, dict):
         for k, v in body.items():
-            if any(part in k.lower() for part in _SENSITIVE_FIELD_NAMES):
-                if isinstance(v, list):
-                    body[k] = ["*" * len(item) if isinstance(item, str) else "***" for item in v]
-                elif isinstance(v, str):
-                    body[k] = "*" * len(v)
-                else:
-                    body[k] = "***"
+            if _is_sensitive_field_name(k):
+                body[k] = _mask_field_value(v)
             elif isinstance(v, dict):
                 mask_sensitive_value(v, content_type)
             elif isinstance(v, list):
@@ -83,16 +105,100 @@ def mask_sensitive_value(body: Any, content_type: str) -> Any:
     return body
 
 
-def mask_sensitive_headers(headers: dict[str, str]) -> dict[str, str]:
+def mask_sensitive_headers(headers: dict[str, str], extra_names: Iterable[str] = ()) -> dict[str, str]:
     """Return a copy of `headers` with sensitive values replaced by asterisks.
 
     Header names are matched case-insensitively against a built-in blocklist
-    (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`).
-    All other headers are passed through unchanged.
+    (`Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`, `Api-Key`), plus any
+    name in `extra_names`. All other headers are passed through unchanged.
 
     :param headers: A mapping of header name to header value.
+    :param extra_names: Additional header names to mask, matched case-insensitively.
     """
-    return {k: ("***" if k.lower() in _SENSITIVE_HEADER_NAMES else v) for k, v in headers.items()}
+    names = _SENSITIVE_HEADER_NAMES | {n.lower() for n in extra_names}
+    return {k: ("***" if k.lower() in names else v) for k, v in headers.items()}
+
+
+def mask_sensitive_url(url: str, extra_names: Iterable[str] = ()) -> str:
+    """Return `url` with sensitive query parameter values and any userinfo password replaced by asterisks.
+
+    Query parameter names are matched exactly and case-insensitively against a built-in list (`token`,
+    `api_key`, `password`, `secret`, ...), plus any name in `extra_names`. Matching is exact rather than
+    substring-based, unlike a request body field, so a pagination cursor like `page_token` is not masked just
+    because it contains the word "token". A password embedded in the URL's userinfo is masked too, since
+    httpx2 accepts it as an implicit `BasicAuth`. A URL with no `?` or `@` is returned as-is without being
+    parsed at all.
+
+    :param url: The URL string to mask.
+    :param extra_names: Additional query parameter names to mask, matched exactly and
+                        case-insensitively. Used to mask a name an auth scheme was configured with,
+                        e.g. a custom `APIKeyAuth` parameter name that falls outside the built-in list.
+    """
+    if "?" not in url and "@" not in url:
+        return url
+    parsed = URL(url)
+    masked_query = _mask_query(parsed.query, _SENSITIVE_QUERY_NAMES | {n.lower() for n in extra_names})
+    if not parsed.password and masked_query == parsed.query:
+        return url
+    kwargs: dict[str, Any] = {}
+    if masked_query != parsed.query:
+        kwargs["query"] = masked_query
+    if parsed.password:
+        kwargs["username"] = parsed.username
+        kwargs["password"] = "*" * len(parsed.password)
+    return str(parsed.copy_with(**kwargs))
+
+
+def _mask_query(query: bytes, names: frozenset[str]) -> bytes:
+    """Mask sensitive parameter values in a URL's raw, still percent-encoded query string
+
+    :param query: The query bytes, as returned by `httpx2.URL.query`.
+    :param names: Lowercased parameter names whose values should be masked.
+    """
+    parts = []
+    for part in query.split(b"&"):
+        name, eq, value = part.partition(b"=")
+        if eq and name.decode("ascii", "replace").lower() in names:
+            part = name + b"=" + b"*" * len(value)
+        parts.append(part)
+    return b"&".join(parts)
+
+
+def get_sensitive_names(request: Request) -> frozenset[str]:
+    """Return the extra header/query parameter names an auth declared as sensitive on `request`
+
+    Populated by an auth's flow (see `APIKeyAuth`, `TokenProviderAuth`) via the `sensitive_names` request
+    extension, so a custom header or query parameter name is masked out of logs the same as a built-in
+    one.
+
+    :param request: The request to read the declared names from.
+    """
+    return request.extensions.get(SENSITIVE_NAMES_EXTENSION, frozenset())
+
+
+def mask_request_headers(request: Request, headers: dict[str, str]) -> dict[str, str]:
+    """Return a copy of `headers` masked using the built-in blocklist plus any names an auth declared sensitive
+    on `request`
+
+    :param request: The request to read declared sensitive names from. Pass `response.request` when masking a
+                    response's headers, since that is the same object the auth flow mutated.
+    :param headers: The header mapping to mask.
+    """
+    return mask_sensitive_headers(headers, extra_names=get_sensitive_names(request))
+
+
+def build_log_data(request: Request) -> dict[str, Any]:
+    """Build the `request_id`/`request`/`method`/`path` fields shared by every request/response logging path
+
+    :param request: The request to summarize.
+    """
+    url = mask_sensitive_url(str(request.url), extra_names=get_sensitive_names(request))
+    return {
+        "request_id": request.request_id,
+        "request": f"{request.method.upper()} {url}",
+        "method": request.method,
+        "path": url,
+    }
 
 
 def process_response(response: Response | RestResponse, prettify: bool = False) -> JSONType:
@@ -152,11 +258,11 @@ def format_request_failure(response: Response | RestResponse) -> str:
     if isinstance(response, RestResponse):
         response = response._response
 
-    request = response.request
+    log_data = build_log_data(response.request)
     status = str(response.status_code)
     if reason := get_response_reason(response):
         status += f" {reason}"
-    return f"{request.method.upper()} {request.url!s} - {status} (request_id: {request.request_id})"
+    return f"{log_data['request']} - {status} (request_id: {log_data['request_id']})"
 
 
 def is_connection_reset(exc: BaseException) -> bool:
@@ -230,6 +336,21 @@ def truncate_body(value: str | bytes) -> str | bytes:
     if len(value) > TRUNCATE_LEN:
         return _truncate(value)
     return value
+
+
+def _is_sensitive_field_name(name: str) -> bool:
+    """Return whether a field or query parameter name matches a known sensitive word"""
+    return any(part in name.lower() for part in _SENSITIVE_FIELD_NAMES)
+
+
+def _mask_field_value(value: Any) -> Any:
+    """Mask a single sensitive field value, preserving its shape"""
+    if isinstance(value, list):
+        return ["*" * len(item) if isinstance(item, str) else "***" for item in value]
+    elif isinstance(value, str):
+        return "*" * len(value)
+    else:
+        return "***"
 
 
 def _decode_utf8(obj: Any) -> Any:

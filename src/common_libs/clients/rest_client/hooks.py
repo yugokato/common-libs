@@ -15,10 +15,11 @@ from common_libs.ansi_colors import ColorCodes, color
 from common_libs.logging import get_logger
 
 from .utils import (
+    build_log_data,
     format_request_failure,
     get_response_reason,
     get_response_time,
-    mask_sensitive_headers,
+    mask_request_headers,
     parse_query_strings,
     process_request_body,
     process_response,
@@ -82,36 +83,32 @@ def response_hooks(response: Response, quiet: bool, rest_client: ClientType) -> 
         processed_resp: JSONType = "N/A (streaming)"
     else:
         processed_resp = process_response(response, prettify=rest_client.prettify_response_log)
-    _log_response(response, quiet, rest_client, processed_resp)
+    log_data = build_log_data(response.request)
+    _log_response(response, quiet, rest_client, processed_resp, log_data)
     if not quiet:
-        _print_api_summary(response, rest_client, processed_resp)
+        _print_api_summary(response, rest_client, processed_resp, log_data)
 
 
 def _log_request(request: Request, quiet: bool) -> None:
     """Log API request"""
     if not quiet:
-        body = process_request_body(request, truncate_bytes=True)
-        log_data = {
-            "request_id": request.request_id,
-            "request": f"{request.method.upper()} {request.url}",
-            "method": request.method,
-            "path": str(request.url),
-            "payload": body,
-            "request_headers": mask_sensitive_headers(dict(request.headers)),
-        }
-        logger.info(f"request: {request.method} {request.url}", extra=log_data)
+        log_data = build_log_data(request)
+        log_data["payload"] = process_request_body(request, truncate_bytes=True)
+        # On the first attempt, a custom header/query name an auth would declare sensitive isn't recorded on
+        # `request` yet, since request hooks run before the auth flow. A retried or reconnected attempt reuses
+        # the same `request` object, which by then carries the auth-declared names from the first attempt.
+        log_data["request_headers"] = mask_request_headers(request, dict(request.headers))
+        logger.info(f"request: {log_data['request']}", extra=log_data)
 
 
-def _log_response(response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType) -> None:
+def _log_response(
+    response: Response, quiet: bool, rest_client: ClientType, processed_resp: JSONType, log_data: dict[str, Any]
+) -> None:
     """Log API response"""
-    request: Request = response.request
     log_data = {
-        "request_id": request.request_id,
-        "request": f"{request.method.upper()} {request.url}",
-        "method": request.method,
-        "path": str(request.url),
+        **log_data,
         "status_code": response.status_code,
-        "response_headers": mask_sensitive_headers(dict(response.headers)),
+        "response_headers": mask_request_headers(response.request, dict(response.headers)),
         "response_time": get_response_time(response),
         "response": processed_resp,
     }
@@ -127,7 +124,9 @@ def _log_response(response: Response, quiet: bool, rest_client: ClientType, proc
         logger.error(format_request_failure(response) if quiet else msg, extra=log_data)
 
 
-def _print_api_summary(response: Response, rest_client: ClientType, processed_resp: JSONType) -> None:
+def _print_api_summary(
+    response: Response, rest_client: ClientType, processed_resp: JSONType, log_data: dict[str, Any]
+) -> None:
     """Print API request/response summary to the console"""
     # The console summary is a human-facing view of INFO-level request/response activity. Render it only when a
     # downstream has opted into logging (`setup_logging` raises the `common_libs` logger to INFO). By default the
@@ -141,20 +140,21 @@ def _print_api_summary(response: Response, rest_client: ClientType, processed_re
     summary = ""
 
     # request_id
-    summary += color(f"{bullet} request_id: {request.request_id}\n", color_code=ColorCodes.CYAN)
+    summary += color(f"{bullet} request_id: {log_data['request_id']}\n", color_code=ColorCodes.CYAN)
 
     # method and url
-    summary += color(f"{bullet} request: {request.method} {request.url}\n", color_code=ColorCodes.CYAN)
+    url = log_data["path"]
+    summary += color(f"{bullet} request: {log_data['request']}\n", color_code=ColorCodes.CYAN)
 
     # request headers
     if log_headers:
         summary += color(
-            f"{bullet} request_headers: {mask_sensitive_headers(dict(request.headers))}\n",
+            f"{bullet} request_headers: {mask_request_headers(request, dict(request.headers))}\n",
             color_code=ColorCodes.CYAN,
         )
 
     # request payload and query parameters
-    if query_strings := parse_query_strings(str(request.url)):
+    if query_strings := parse_query_strings(url):
         summary += color(f"{bullet} query params: {query_strings}\n", color_code=ColorCodes.CYAN)
     request_body = process_request_body(request, truncate_bytes=True)
     if request_body:
@@ -188,7 +188,7 @@ def _print_api_summary(response: Response, rest_client: ClientType, processed_re
     # response headers
     if log_headers:
         summary += color(
-            f"{bullet} response_headers: {mask_sensitive_headers(dict(response.headers))}\n",
+            f"{bullet} response_headers: {mask_request_headers(request, dict(response.headers))}\n",
             color_code=ColorCodes.CYAN,
         )
 

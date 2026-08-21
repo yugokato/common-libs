@@ -7,32 +7,31 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from httpx2 import AsyncClient, Auth, TimeoutException, TransportError
+from httpx2 import AsyncClient, TimeoutException, TransportError
 from httpx2 import Client as SyncClient
+from httpx2._client import _is_https_redirect
 
 from common_libs.logging import get_logger
 
 from .rate_limit import RateLimit, RateLimiter
 from .retry import DEFAULT_RETRY_POLICY, RetryPolicy, retry_on
 from .types import Request, Response
-from .utils import SAFE_HTTP_METHODS, is_connection_reset, set_request_to_exception
+from .utils import (
+    REQUEST_ID_HEADER,
+    SAFE_HTTP_METHODS,
+    build_log_data,
+    get_sensitive_names,
+    is_connection_reset,
+    set_request_to_exception,
+)
 
 logger = get_logger(__name__)
-
-
-class BearerAuth(Auth):
-    def __init__(self, token: str) -> None:
-        self.token = token
-
-    def auth_flow(self, request: Request) -> Generator[Request]:
-        request.headers["Authorization"] = f"Bearer {self.token}"
-        yield request
 
 
 class HTTPClientMixin:
     """Shared mixin for sync and async httpx2 clients"""
 
-    _request_id_header = "X-Request-ID"
+    _request_id_header = REQUEST_ID_HEADER
 
     def __init__(
         self,
@@ -65,9 +64,10 @@ class HTTPClientMixin:
         request = super().build_request(*args, **kwargs)  # type: ignore[misc]
         return self._modify_request(request)
 
-    def _build_redirect_request(self, *args: Any, **kwargs: Any) -> Request:
-        request = super()._build_redirect_request(*args, **kwargs)  # type: ignore[misc]
-        return self._modify_request(request)
+    def _build_redirect_request(self, request: Request, response: Response) -> Request:
+        redirected = super()._build_redirect_request(request, response)  # type: ignore[misc]
+        self._strip_sensitive_headers(request, redirected)
+        return self._modify_request(redirected)
 
     def call_request_hooks(self, request: Request) -> None:
         """Call request hooks"""
@@ -112,6 +112,10 @@ class HTTPClientMixin:
     def _modify_request(self, request: Request) -> Request:
         """Stamp the client's own attributes on a request that does not already carry them
 
+        Called both when the client builds a request and again right before one is dispatched, so a
+        request that skipped the client's request building (handed straight to `send()`, or built from
+        scratch by an auth flow) is still guaranteed a `request_id`.
+
         :param request: The request to stamp.
         """
         if not hasattr(request, "request_id"):
@@ -129,27 +133,38 @@ class HTTPClientMixin:
         response.is_stream = not response.is_closed
         return response
 
-    def _build_log_data(self, request: Request) -> dict[str, str]:
-        return {
-            "request_id": request.request_id,
-            "request": f"{request.method.upper()} {request.url}",
-            "method": request.method,
-            "path": str(request.url),
-        }
+    def _strip_sensitive_headers(self, original: Request, redirected: Request) -> None:
+        """Drop a header an auth declared sensitive from a cross-origin redirect
 
-    def _handle_error(self, e: Exception, request: Request, log_data: dict[str, str]) -> None:
+        httpx2 already strips `Authorization` on a redirect that changes origin, except for a same-host http-to-https
+        upgrade. A custom header name a `TokenProviderAuth`/`APIKeyAuth` was configured with is not `httpx2`'s to know
+        about, so it would otherwise survive that same redirect.
+
+        :param original: The request that received the redirect response.
+        :param redirected: The follow-up request httpx2 already built for the redirect.
+        """
+        names = {n.lower() for n in get_sensitive_names(original)} - {"authorization"}
+        same_origin = original.url.origin == redirected.url.origin
+        if not names or same_origin or _is_https_redirect(original.url, redirected.url):
+            return
+        for name in [n for n in redirected.headers if n.lower() in names]:
+            del redirected.headers[name]
+
+    def _handle_error(self, e: Exception, request: Request) -> None:
+        log_data = build_log_data(request)
         log_data["traceback"] = traceback.format_exc()
+        url = log_data["path"]
+        request_id = log_data["request_id"]
         if isinstance(e, TimeoutException):
             logger.error(
-                f"Request timed out: {request.method.upper()} {request.url}\n (request_id: {request.request_id})",
-                extra=log_data,
+                f"Request timed out: {request.method.upper()} {url}\n (request_id: {request_id})", extra=log_data
             )
         else:
             logger.error(
                 f"An unexpected error occurred while processing the API request\n"
-                f"- request: {request.method.upper()} {request.url}\n"
+                f"- request: {request.method.upper()} {url}\n"
                 f"- error: {type(e).__name__}: {e}\n"
-                f"- request_id: {request.request_id}",
+                f"- request_id: {request_id}",
                 extra=log_data,
             )
 
@@ -176,20 +191,21 @@ class SyncHTTPClient(HTTPClientMixin, SyncClient):
         - Log exceptions
         """
         self._modify_request(request)
-        log_data = self._build_log_data(request)
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
                 return cast(Response, send_fn(request, **kwargs))
             except TransportError as e:
                 if self._should_reconnect(e, request):
-                    logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
+                    logger.warning(
+                        "The connection was already reset by peer. Reconnecting...", extra=build_log_data(request)
+                    )
                     return cast(Response, send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
             set_request_to_exception(e, request)
-            self._handle_error(e, request, log_data)
+            self._handle_error(e, request)
             raise
 
     def _send(self, request: Request, **kwargs: Any) -> Response:
@@ -232,20 +248,21 @@ class AsyncHTTPClient(HTTPClientMixin, AsyncClient):
         - Log exceptions
         """
         self._modify_request(request)
-        log_data = self._build_log_data(request)
         send_fn = self._retry_decorator(self._send) if self._retry_decorator is not None else self._send
         try:
             try:
                 return cast(Response, await send_fn(request, **kwargs))
             except TransportError as e:
                 if self._should_reconnect(e, request):
-                    logger.warning("The connection was already reset by peer. Reconnecting...", extra=log_data)
+                    logger.warning(
+                        "The connection was already reset by peer. Reconnecting...", extra=build_log_data(request)
+                    )
                     return cast(Response, await send_fn(request, **kwargs))
                 else:
                     raise
         except Exception as e:
             set_request_to_exception(e, request)
-            self._handle_error(e, request, log_data)
+            self._handle_error(e, request)
             raise
 
     async def _send(self, request: Request, **kwargs: Any) -> Response:

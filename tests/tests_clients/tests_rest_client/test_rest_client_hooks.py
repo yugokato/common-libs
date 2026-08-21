@@ -18,7 +18,7 @@ from common_libs.clients.rest_client.hooks import (
 )
 from common_libs.clients.rest_client.rest_client import RestClient
 from common_libs.clients.rest_client.types import Request
-from common_libs.clients.rest_client.utils import TRUNCATE_LEN, format_request_failure
+from common_libs.clients.rest_client.utils import TRUNCATE_LEN, build_log_data, format_request_failure
 
 HOOKS_LOGGER_NAME = "common_libs.clients.rest_client.hooks"
 
@@ -125,7 +125,7 @@ class TestRequestHooks:
         mock_request.url = "http://example.com/api"
         mock_request.headers = {"Content-Type": "application/json"}
         mock_request.extensions = {}
-        mock_request.read.return_value = b""
+        mock_request.content = b""
 
         request_hooks(mock_request, quiet=False)
         mock_hooks_logger.info.assert_called()
@@ -202,7 +202,7 @@ class TestHeaderMasking:
         mock_request.url = "http://example.com/api"
         mock_request.headers = headers
         mock_request.extensions = {}
-        mock_request.read.return_value = b""
+        mock_request.content = b""
         return mock_request
 
     def test_request_log_extra_masks_authorization_header(
@@ -250,7 +250,7 @@ class TestPayloadTruncation:
         mock_request.url = "http://example.com/api"
         mock_request.headers = {"Content-Type": "application/json"}
         mock_request.extensions = {}
-        mock_request.read.return_value = body
+        mock_request.content = body
         return mock_request
 
     def test_large_json_payload_is_truncated_in_summary(self, mocker: MockFixture) -> None:
@@ -278,7 +278,8 @@ class TestPayloadTruncation:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None)
+        log_data = build_log_data(mock_response.request)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None, log_data=log_data)
 
         output = "".join(written)
         assert "TRUNCATED" in output
@@ -308,7 +309,8 @@ class TestPayloadTruncation:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None)
+        log_data = build_log_data(mock_response.request)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp=None, log_data=log_data)
 
         output = "".join(written)
         assert "TRUNCATED" not in output
@@ -325,7 +327,7 @@ class TestApiSummaryOptIn:
         mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=False)
 
         mock_response = mock_response_factory(200)
-        mock_response.request.read.return_value = b""
+        mock_response.request.content = b""
         mock_client = mocker.MagicMock()
         mock_client.log_headers = False
         mock_client.prettify_response_log = False
@@ -334,7 +336,8 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body")
+        log_data = build_log_data(mock_response.request)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body", log_data=log_data)
 
         assert written == []
 
@@ -345,7 +348,7 @@ class TestApiSummaryOptIn:
         mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=False)
 
         mock_response = mock_response_factory(500)
-        mock_response.request.read.return_value = b""
+        mock_response.request.content = b""
         mock_client = mocker.MagicMock()
         mock_client.log_headers = False
         mock_client.prettify_response_log = False
@@ -354,7 +357,8 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="error body")
+        log_data = build_log_data(mock_response.request)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="error body", log_data=log_data)
 
         assert written == []
 
@@ -365,7 +369,7 @@ class TestApiSummaryOptIn:
         mocker.patch("common_libs.clients.rest_client.hooks.logger.isEnabledFor", return_value=True)
 
         mock_response = mock_response_factory(200)
-        mock_response.request.read.return_value = b""
+        mock_response.request.content = b""
         mock_client = mocker.MagicMock()
         mock_client.log_headers = False
         mock_client.prettify_response_log = False
@@ -374,7 +378,8 @@ class TestApiSummaryOptIn:
         mocker.patch("sys.stdout.write", side_effect=written.append)
         mocker.patch("sys.stdout.flush")
 
-        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body")
+        log_data = build_log_data(mock_response.request)
+        _print_api_summary(mock_response, rest_client=mock_client, processed_resp="ok body", log_data=log_data)
 
         output = "".join(written)
         assert "status_code" in output

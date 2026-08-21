@@ -3,23 +3,28 @@
 import errno
 import inspect
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from http import HTTPStatus
 from typing import Any
 
+import httpx2
 import pytest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client.rest_client import AsyncRestClient
-from common_libs.clients.rest_client.types import RestResponse
+from common_libs.clients.rest_client.types import Request, RestResponse
 from common_libs.clients.rest_client.utils import (
+    SENSITIVE_NAMES_EXTENSION,
     TRUNCATE_LEN,
+    build_log_data,
     format_request_failure,
     get_response_reason,
+    get_sensitive_names,
     get_supported_request_parameters,
     is_connection_reset,
     manage_content_type,
     mask_sensitive_headers,
+    mask_sensitive_url,
     mask_sensitive_value,
     parse_query_strings,
     process_request_body,
@@ -270,6 +275,143 @@ class TestMaskSensitiveHeaders:
         """Test that an empty input returns an empty dict"""
         assert mask_sensitive_headers({}) == {}
 
+    def test_extra_name_masked(self) -> None:
+        """Test that a header name passed via extra_names is masked even though it is not in the built-in list"""
+        headers = {"X-Auth-Token": "my-api-key", "Content-Type": "application/json"}
+        result = mask_sensitive_headers(headers, extra_names=["X-Auth-Token"])
+        assert result["X-Auth-Token"] == "***"
+        assert result["Content-Type"] == "application/json"
+
+
+class TestMaskSensitiveUrl:
+    """Tests for mask_sensitive_url function"""
+
+    def test_sensitive_query_param_masked(self) -> None:
+        """Test that a sensitive query parameter value is masked"""
+        result = mask_sensitive_url("http://example.com/api?token=abc123&q=1")
+        assert result == "http://example.com/api?token=******&q=1"
+
+    def test_non_sensitive_query_params_unchanged(self) -> None:
+        """Test that a URL with only non-sensitive query parameters is returned unchanged"""
+        url = "http://example.com/api?foo=bar&baz=qux"
+        assert mask_sensitive_url(url) == url
+
+    def test_url_without_query_string_unchanged(self) -> None:
+        """Test that a URL with no query string is returned unchanged"""
+        url = "http://example.com/api"
+        assert mask_sensitive_url(url) == url
+
+    def test_userinfo_password_masked(self) -> None:
+        """Test that a password embedded in the URL's userinfo is masked"""
+        result = mask_sensitive_url("https://alice:hunter2@example.com/x")
+        assert result == "https://alice:*******@example.com/x"
+
+    def test_userinfo_password_masked_with_query_string(self) -> None:
+        """Test that a userinfo password and a sensitive query parameter are both masked in the same URL"""
+        result = mask_sensitive_url("https://alice:hunter2@example.com/x?q=1&token=abc")
+        assert result == "https://alice:*******@example.com/x?q=1&token=***"
+
+    def test_userinfo_password_masked_with_no_path(self) -> None:
+        """Test that a userinfo password is masked when the URL has no path after the authority"""
+        result = mask_sensitive_url("https://alice:hunter2@example.com")
+        assert result == "https://alice:*******@example.com"
+
+    def test_userinfo_without_password_unchanged(self) -> None:
+        """Test that a bare username with no password in the userinfo is left unchanged"""
+        url = "https://alice@example.com/x"
+        assert mask_sensitive_url(url) == url
+
+    def test_url_without_scheme_separator_unchanged(self) -> None:
+        """Test that a relative URL with no scheme separator is left unchanged"""
+        url = "/api/things?token=abc"
+        assert mask_sensitive_url(url) == "/api/things?token=***"
+
+    def test_non_sensitive_query_string_with_userinfo_password_unchanged_except_password(self) -> None:
+        """Test that non-sensitive query parameters alongside a userinfo password are left unmasked"""
+        result = mask_sensitive_url("https://alice:hunter2@example.com/x?foo=bar")
+        assert result == "https://alice:*******@example.com/x?foo=bar"
+
+    def test_port_and_at_sign_in_query_not_mistaken_for_userinfo(self) -> None:
+        """Test that a port in the authority and an '@' inside a query value are not mistaken for userinfo"""
+        url = "https://api.example.com:8443?filter=user@example.com"
+        assert mask_sensitive_url(url) == url
+
+    def test_pagination_cursor_not_masked(self) -> None:
+        """Test that common pagination cursor parameter names are not masked"""
+        url = "https://example.com/api/items?page_token=abc123&next_token=xyz&continuationToken=ghi&limit=10"
+        assert mask_sensitive_url(url) == url
+
+    def test_generic_key_and_auth_params_not_masked(self) -> None:
+        """Test that the generic parameter names 'key' and 'auth' are left unmasked, since they are common
+        non-secret query parameters and masking them would corrupt logs read for debugging
+        """
+        url = "https://example.com/api?key=sort_key&auth=oidc"
+        assert mask_sensitive_url(url) == url
+
+    def test_signature_param_masked(self) -> None:
+        """Test that 'signature' is masked, since it is the credential in pre-signed-URL schemes"""
+        result = mask_sensitive_url("https://example.com/file?signature=abc123&q=1")
+        assert result == "https://example.com/file?signature=******&q=1"
+
+    def test_extra_name_masked(self) -> None:
+        """Test that a query parameter name passed via extra_names is masked even though it is not in the
+        built-in list
+        """
+        result = mask_sensitive_url("http://example.com/api?custom_key=abc123&q=1", extra_names=["custom_key"])
+        assert result == "http://example.com/api?custom_key=******&q=1"
+
+
+class TestGetSensitiveNames:
+    """Tests for get_sensitive_names function"""
+
+    def test_returns_names_stamped_on_extensions(self) -> None:
+        """Test that names stamped on the sensitive_names extension are returned"""
+        request = Request("GET", "http://example.com", extensions={SENSITIVE_NAMES_EXTENSION: frozenset({"key"})})
+        assert get_sensitive_names(request) == frozenset({"key"})
+
+    def test_returns_empty_frozenset_when_not_set(self) -> None:
+        """Test that an empty frozenset is returned when no auth stamped the extension"""
+        request = Request("GET", "http://example.com")
+        assert get_sensitive_names(request) == frozenset()
+
+
+class TestBuildLogData:
+    """Tests for build_log_data function"""
+
+    def test_includes_expected_fields(self) -> None:
+        """Test that the returned dict includes request_id, request, method, and path"""
+        request = Request("GET", "http://example.com/api/users?token=abc")
+        request.request_id = "log-req-id"
+
+        log_data = build_log_data(request)
+
+        assert log_data["request_id"] == "log-req-id"
+        assert log_data["method"] == "GET"
+        assert log_data["path"] == "http://example.com/api/users?token=***"
+        assert log_data["request"] == "GET http://example.com/api/users?token=***"
+
+    def test_masks_names_declared_via_extensions(self) -> None:
+        """Test that a name an auth declared via the sensitive_names extension is masked in the built fields"""
+        request = Request(
+            "GET",
+            "http://example.com/api/users?custom_key=abc",
+            extensions={SENSITIVE_NAMES_EXTENSION: frozenset({"custom_key"})},
+        )
+        request.request_id = "log-req-id"
+
+        log_data = build_log_data(request)
+
+        assert log_data["path"] == "http://example.com/api/users?custom_key=***"
+
+    def test_raises_for_a_request_the_client_never_stamped(self) -> None:
+        """Test that a plain request never routed through the client (e.g. built via httpx2 directly, bypassing
+        both build_request and send) raises AttributeError rather than logging an empty request_id
+        """
+        request = Request("GET", "http://example.com/api")
+
+        with pytest.raises(AttributeError):
+            build_log_data(request)
+
 
 class TestParseQueryStrings:
     """Tests for parse_query_strings function"""
@@ -412,7 +554,7 @@ class TestProcessRequestBody:
         """Test that JSON body is parsed to dict"""
         expected = {"key": "value"}
         mock_request = mocker.MagicMock()
-        mock_request.read.return_value = b'{"key": "value"}'
+        mock_request.content = b'{"key": "value"}'
         mock_request.headers = {"Content-Type": "application/json"}
         result = process_request_body(mock_request, hide_sensitive_values=False)
         assert result == expected
@@ -420,7 +562,7 @@ class TestProcessRequestBody:
     def test_password_masked_in_json_body(self, mocker: MockFixture) -> None:
         """Test that password is masked in JSON body"""
         mock_request = mocker.MagicMock()
-        mock_request.read.return_value = b'{"username": "admin", "password": "secret"}'
+        mock_request.content = b'{"username": "admin", "password": "secret"}'
         mock_request.headers = {"Content-Type": "application/json"}
         result = process_request_body(mock_request, hide_sensitive_values=True)
         assert isinstance(result, dict)
@@ -429,17 +571,40 @@ class TestProcessRequestBody:
     def test_empty_body_returned_as_is(self, mocker: MockFixture) -> None:
         """Test that empty body is returned as is"""
         mock_request = mocker.MagicMock()
-        mock_request.read.return_value = b""
+        mock_request.content = b""
         result = process_request_body(mock_request)
         assert not result
 
     def test_body_without_content_type_does_not_raise(self, mocker: MockFixture) -> None:
         """Test that process_request_body handles a missing Content-Type header without raising"""
         mock_request = mocker.MagicMock()
-        mock_request.read.return_value = b'{"key": "value"}'
+        mock_request.content = b'{"key": "value"}'
         mock_request.headers = {}
         result = process_request_body(mock_request, hide_sensitive_values=True)
         assert result == {"key": "value"}
+
+    def test_unbuffered_multipart_body_reported_as_streaming(self) -> None:
+        """Test that a files= upload whose body has not been read yet is reported as streaming instead of being
+        forced into memory. Forcing a read here made a 401 auth replay decision depend on whether request
+        logging happened to run first, since reading the body is also what makes it replayable.
+        """
+        with httpx2.Client(base_url="http://example.com") as c:
+            request = c.build_request("POST", "/x", files={"f": ("n.txt", b"x" * 10)})
+
+        assert process_request_body(request) == "<streaming>"
+
+    async def test_unbuffered_async_streaming_body_does_not_crash(self) -> None:
+        """Test that an unbuffered async streaming body is reported as streaming rather than crashing.
+        Forcing a read of an async iterator stream via the sync `request.read()` raised `AssertionError`.
+        """
+
+        async def body() -> AsyncIterator[bytes]:
+            yield b"chunk"
+
+        async with httpx2.AsyncClient(base_url="http://example.com") as c:
+            request = c.build_request("POST", "/x", content=body())
+
+        assert process_request_body(request) == "<streaming>"
 
 
 class TestGetSupportedRequestParameters:

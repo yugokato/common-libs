@@ -1,7 +1,10 @@
 """Tests for common_libs.clients.rest_client.base module"""
 
+import pytest
+
+from common_libs.clients.rest_client.auth import BasicAuth, BearerAuth, TokenProviderAuth
 from common_libs.clients.rest_client.base import RestClientBase
-from common_libs.clients.rest_client.ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
+from common_libs.clients.rest_client.ext import AsyncHTTPClient, SyncHTTPClient
 
 
 class TestRestClientBase:
@@ -42,43 +45,117 @@ class TestRestClientBase:
         client.base_url = new_url
         assert client.base_url == new_url
 
-    def test_get_bearer_token_from_bearer_auth(self) -> None:
-        """Test getting bearer token when BearerAuth is set"""
+    def test_auth_ctor_param_reaches_underlying_client(self) -> None:
+        """Test that the auth constructor parameter is passed through to the underlying httpx2 client"""
+        auth = BearerAuth("ctor-token")
+        client = RestClientBase("http://example.com", auth=auth)
+        assert client.client.auth is auth
+
+    def test_auth_property_getter(self) -> None:
+        """Test that the auth property reads the underlying client's auth"""
+        auth = BearerAuth("some-token")
+        client = RestClientBase("http://example.com")
+        client.client.auth = auth
+        assert client.auth is auth
+
+    def test_auth_property_setter(self) -> None:
+        """Test that the auth property setter updates the underlying client's auth"""
+        auth = BearerAuth("some-token")
+        client = RestClientBase("http://example.com")
+        client.auth = auth
+        assert client.client.auth is auth
+
+    def test_get_token_from_token_auth(self) -> None:
+        """Test getting the token when a TokenProviderAuth is set"""
         token = "my-token-123"
         client = RestClientBase("http://example.com")
         client.client.auth = BearerAuth(token)
-        result = client.get_bearer_token()
-        assert result == token
+        assert client.token == token
 
-    def test_get_bearer_token_none_when_no_auth(self) -> None:
-        """Test that get_bearer_token returns None when no auth is set"""
+    def test_get_token_from_provider_backed_token_auth(self) -> None:
+        """Test getting the token when a provider-backed TokenProviderAuth already has a cached token"""
+        auth = TokenProviderAuth(lambda: "provider-token")
+        auth.token = "cached-token"
+        client = RestClientBase("http://example.com")
+        client.client.auth = auth
+        assert client.token == "cached-token"
+
+    def test_get_token_none_when_no_auth(self) -> None:
+        """Test that the token property returns None when no auth is set"""
         client = RestClientBase("http://example.com")
         client.client.auth = None
-        token = client.get_bearer_token()
-        assert token is None
+        assert client.token is None
 
-    def test_set_bearer_token(self) -> None:
-        """Test that set_bearer_token sets BearerAuth on the client"""
-        token = "new-token"
+    def test_token_setter_logs_in_with_a_bearer_auth(self) -> None:
+        """Test that assigning client.token installs a BearerAuth carrying that token"""
         client = RestClientBase("http://example.com")
-        client.set_bearer_token(token)
+        client.token = "new-token"
         assert isinstance(client.client.auth, BearerAuth)
-        assert client.client.auth.token == token
+        assert client.token == "new-token"
 
-    def test_unset_bearer_token(self) -> None:
-        """Test that unset_bearer_token removes auth from the client"""
+    def test_token_setter_none_clears_the_bearer_auth_in_place(self) -> None:
+        """Test that assigning None to client.token clears the installed BearerAuth's token rather than
+        discarding the auth itself
+        """
+        auth = BearerAuth("some-token")
+        client = RestClientBase("http://example.com", auth=auth)
+        client.token = None
+        assert client.client.auth is auth
+        assert client.token is None
+
+    def test_token_setter_none_with_no_auth_is_a_noop(self) -> None:
+        """Test that assigning None to client.token when no auth is installed stays a no-op instead of
+        installing a BearerAuth that holds no token
+        """
         client = RestClientBase("http://example.com")
-        client.set_bearer_token("some-token")
-        client.unset_bearer_token()
+        client.token = None
         assert client.client.auth is None
 
-    def test_get_bearer_token_from_header_with_extra_whitespace(self) -> None:
-        """Test that get_bearer_token correctly extracts the token when the Authorization header has extra whitespace"""
-        token = "my-token-123"
+    def test_token_setter_empty_string_raises(self) -> None:
+        """Test that assigning an empty string to client.token raises instead of silently clearing the auth"""
+        client = RestClientBase("http://example.com", auth=BearerAuth("some-token"))
+        with pytest.raises(ValueError, match="token must not be empty"):
+            client.token = ""
+        assert client.token == "some-token"
+
+    def test_token_setter_forwards_to_an_installed_token_auth(self) -> None:
+        """Test that assigning client.token seeds an installed TokenProviderAuth's cache instead of replacing the
+        auth with a BearerAuth
+        """
+        auth = TokenProviderAuth(lambda: "provider-token")
+        client = RestClientBase("http://example.com", auth=auth)
+        client.token = "seeded-token"
+        assert client.client.auth is auth
+        assert client.token == "seeded-token"
+
+    def test_token_setter_raises_for_a_non_bearer_style_auth(self) -> None:
+        """Test that assigning client.token when a non-bearer-style auth is installed raises TypeError
+        instead of silently discarding it
+        """
+        auth = BasicAuth("user", "pw")
+        client = RestClientBase("http://example.com", auth=auth)
+        with pytest.raises(TypeError, match="BasicAuth"):
+            client.token = "new-token"
+        assert client.client.auth is auth
+
+    def test_token_getter_returns_none_for_a_non_bearer_style_auth(self) -> None:
+        """Test that the token getter returns None when a non-bearer-style auth is installed, rather than
+        raising, since only the setter is restricted to bearer-style auths
+        """
+        client = RestClientBase("http://example.com", auth=BasicAuth("user", "pw"))
+        assert client.token is None
+
+    def test_auth_assignment_logs_in_and_token_reflects_it(self) -> None:
+        """Test that assigning a BearerAuth to client.auth is how you log in, and client.token reads it back"""
         client = RestClientBase("http://example.com")
-        client.client.headers["Authorization"] = f"Bearer  {token}"  # two spaces
-        result = client.get_bearer_token()
-        assert result == token
+        client.auth = BearerAuth("new-token")
+        assert client.token == "new-token"
+
+    def test_auth_assignment_of_none_logs_out(self) -> None:
+        """Test that assigning None to client.auth is how you log out, and client.token reflects that"""
+        client = RestClientBase("http://example.com", auth=BearerAuth("some-token"))
+        client.auth = None
+        assert client.token is None
 
     def test_http2_enabled_by_default(self) -> None:
         """Test that HTTP/2 is enabled by default when no http2 kwarg is supplied"""

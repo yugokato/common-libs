@@ -11,35 +11,13 @@ from httpx2 import TransportError
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import RetryPolicy
-from common_libs.clients.rest_client.ext import AsyncHTTPClient, BearerAuth, SyncHTTPClient
+from common_libs.clients.rest_client.ext import AsyncHTTPClient, SyncHTTPClient
 from common_libs.clients.rest_client.rest_client import AsyncRestClient, RestClient
 from common_libs.clients.rest_client.retry import BackoffStrategy
 from common_libs.clients.rest_client.types import Request, RestResponse
 from common_libs.clients.rest_client.utils import get_request_from_exception
 
 BASE_URL = "http://example.com"
-
-
-class TestBearerAuth:
-    """Tests for BearerAuth class"""
-
-    def test_auth_flow_sets_authorization_header(self) -> None:
-        """Test that auth_flow adds Bearer authorization header to request"""
-        token = "my-secret-token"
-        auth = BearerAuth(token)
-        request = Request("GET", "http://example.com")
-        request.request_id = "req-001"
-
-        gen = auth.auth_flow(request)
-        next(gen)  # advance the generator to apply the header
-
-        assert request.headers["Authorization"] == f"Bearer {token}"
-
-    def test_token_stored(self) -> None:
-        """Test that token is stored on the auth object"""
-        token = "my-token"
-        auth = BearerAuth(token)
-        assert auth.token == token
 
 
 class TestRequestExt:
@@ -322,19 +300,6 @@ class TestHTTPClientMixin:
 
         # Should not raise
         client.call_request_hooks(mock_request)
-
-    def test_build_log_data(self) -> None:
-        """Test that _build_log_data returns expected log fields"""
-        request_id = "log-req-id"
-        client = SyncHTTPClient(base_url="http://example.com")
-        request = Request("GET", "http://example.com/api/users")
-        request.request_id = request_id
-
-        log_data = client._build_log_data(request)
-        assert log_data["request_id"] == request_id
-        assert "GET" in log_data["request"]
-        assert log_data["method"] == "GET"
-        assert isinstance(log_data["path"], str)
 
 
 class TestSyncHTTPClient:
