@@ -29,3 +29,9 @@ Example:
   ```sh
   pip install --force-reinstall <package-name>
   ```
+
+If you're working from a `uv`-managed downstream checkout instead, use:
+
+  ```sh
+  uv lock --upgrade-package common-libs && uv sync
+  ```

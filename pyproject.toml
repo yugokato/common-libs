@@ -24,34 +24,18 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Libraries"
 ]
+dynamic = ["version"]
 dependencies = [
     "python-dotenv~=1.2.1",
     "filelock>=3.18.0",
     "PyYAML~=6.0.2",
     "tabulate>=0.9.0",
 ]
-dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = [
-    "mypy>=2.0.0,<3",
-    "pre-commit>=4.0.0,<5",
-    "ruff>=0.16.0,<0.17.0",
-]
-test = [
-    "pytest>=9,<10",
-    "pytest-asyncio>=1.3.0",
-    "pytest-lazy-fixtures>=1.2.0,<2",
-    "pytest-mock>=3.14.0",
-    "pytest-smoke",
-    "pytest-xdist[psutil]<4",
-    "tox>=4.0.0,<5",
-    "tox-uv>=1.0.0,<2"
-]
 postgresql-client = [
     "psycopg[binary,pool]>=3.2.9",
 ]
-
 redis-client = [
     "redis>=6.2.0",
 ]
@@ -67,6 +51,33 @@ container = [
     "docker==7.1.0",
 ]
 all = ["common-libs[client,http3,container]"]
+
+[dependency-groups]
+lint = [
+    "mypy>=2.0.0,<3",
+    "pre-commit>=4.0.0,<5",
+    "ruff>=0.16.0,<0.17.0",
+]
+test = [
+    "pytest>=9,<10",
+    "pytest-asyncio>=1.3.0",
+    "pytest-lazy-fixtures>=1.2.0,<2",
+    "pytest-mock>=3.14.0",
+    "pytest-smoke",
+    "pytest-xdist[psutil]<4",
+]
+tox = [
+    "tox>=4.22.0,<5",
+    "tox-uv>=1.36.0,<2",
+]
+dev = [
+    {include-group = "lint"},
+    {include-group = "test"},
+    {include-group = "tox"},
+]
+
+[tool.uv]
+required-version = ">=0.12.5"
 
 
 [tool.setuptools.packages.find]
