@@ -216,7 +216,7 @@ def process_response(response: Response | RestResponse, prettify: bool = False) 
         resp = response.json()
         if prettify:
             resp = json.dumps(resp, indent=2)
-    except JSONDecodeError:
+    except (JSONDecodeError, UnicodeDecodeError):
         resp = _decode_utf8(response.content)
 
     return resp
@@ -355,7 +355,7 @@ def _mask_field_value(value: Any) -> Any:
 
 def _decode_utf8(obj: Any) -> Any:
     """Decode bytes object with UTF-8, if possible"""
-    if obj and isinstance(obj, bytes):
+    if isinstance(obj, bytes):
         try:
             obj = obj.decode("utf-8")
         except UnicodeDecodeError:

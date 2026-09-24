@@ -511,6 +511,28 @@ class TestProcessResponse:
         result = process_response(mock_response)
         assert result == expected
 
+    def test_binary_response_falls_back_to_raw_bytes(self) -> None:
+        """Test that a genuinely binary response (not valid UTF-8) falls back to its raw content
+
+        Uses a real `httpx2.Response` rather than a mock, since `response.json()` raising
+        `UnicodeDecodeError` for non-UTF-8 content is a real behavior of the stdlib `json` module
+        decoding bytes, not an assumption to take on faith.
+        """
+        expected = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+        response = httpx2.Response(200, content=expected)
+        response.is_stream = False
+        result = process_response(response)
+        assert result == expected
+
+    def test_empty_response_decodes_to_empty_string(self) -> None:
+        """Test that an empty response body (e.g. a 204) decodes to an empty string, not raw bytes,
+        so it isn't mistaken for binary content downstream
+        """
+        response = httpx2.Response(204, content=b"")
+        response.is_stream = False
+        result = process_response(response)
+        assert result == ""
+
     def test_prettify_formats_json(self, mocker: MockFixture) -> None:
         """Test that prettify=True formats the JSON response"""
         expected = {"key": "value"}
