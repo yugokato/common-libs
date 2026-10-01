@@ -79,6 +79,9 @@ class BaseContainer:
     be given as `name`.
     To support a separate container per environment, pass {'env': <env>} as `labels`.
 
+    Can be used as a context manager (dockerd only) that starts a container on enter and deletes it on exit. A running
+    container is reused, so custom options can be given with `with BaseContainer(...).run(**opts) as ctn:`.
+
     :param image: The image name
     :param tag: The image tag
     :param name: The container name
@@ -125,6 +128,15 @@ class BaseContainer:
         self.tmp_dir = "/tmp"
 
         self._container = None
+
+    @requires_dockerd_runtime
+    def __enter__(self) -> Self:
+        if self.container is None:
+            self.run()
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.delete()
 
     @property
     def container(self) -> DockerdContainer | ContainerdContainer | None:

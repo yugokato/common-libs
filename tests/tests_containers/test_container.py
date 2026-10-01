@@ -151,6 +151,65 @@ class TestBaseContainerDelete:
         ctn.delete()
 
 
+class TestBaseContainerContextManager:
+    """Tests for BaseContainer as a context manager"""
+
+    @pytest.fixture
+    def ctn(self) -> BaseContainer:
+        """A dockerd BaseContainer instance"""
+        return BaseContainer(image="alpine", tag="latest")
+
+    @pytest.fixture
+    def mock_container(self, mock_docker_from_env: MagicMock, mocker: MockFixture) -> MagicMock:
+        """A mock container returned by the mocked docker client when a container is started"""
+        mock_docker_from_env.containers.list.return_value = []
+        container = mocker.MagicMock()
+        container.id = "context-manager-container"
+        mock_docker_from_env.containers.run.return_value = container
+        return container
+
+    def test_enter_runs_container_and_returns_self(self, ctn: BaseContainer, mock_container: MagicMock) -> None:
+        """Test that entering the context starts a container and returns the same instance"""
+        with ctn as entered:
+            assert entered is ctn
+            assert ctn.container is mock_container
+
+    def test_exit_deletes_container(self, ctn: BaseContainer, mock_container: MagicMock) -> None:
+        """Test that exiting the context removes the container and resets the container object"""
+        with ctn:
+            pass
+
+        mock_container.remove.assert_called_once_with(force=True)
+        assert ctn.container is None
+
+    def test_exit_deletes_container_when_block_raises(self, ctn: BaseContainer, mock_container: MagicMock) -> None:
+        """Test that the container is removed and the exception propagates when the block raises"""
+        mock_container.exec_run.return_value = (1, b"command failed")
+
+        with pytest.raises(CommandError, match="non-zero code"), ctn:
+            ctn.exec_run("false")
+
+        mock_container.remove.assert_called_once_with(force=True)
+        assert ctn.container is None
+
+    def test_enter_skips_run_when_container_already_running(
+        self, mock_docker_from_env: MagicMock, ctn: BaseContainer, mock_container: MagicMock
+    ) -> None:
+        """Test that entering the context does not start another container if one was already started"""
+        with ctn.run() as entered:
+            assert entered.container is mock_container
+
+        mock_docker_from_env.containers.run.assert_called_once()
+        mock_container.remove.assert_called_once_with(force=True)
+
+    def test_enter_raises_for_containerd_runtime(self) -> None:
+        """Test that entering the context raises NotImplementedError for containerd runtime"""
+        ctn = BaseContainer(image="alpine", name="my-container", is_containerd=True)
+
+        with pytest.raises(NotImplementedError, match="not supported for containerd runtime"), ctn:
+            pass
+
+
 class TestBaseContainerExecRun:
     """Tests for BaseContainer.exec_run()"""
 
