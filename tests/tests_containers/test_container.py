@@ -83,12 +83,14 @@ class TestBaseContainerInit:
         assert ctn.docker_client is None
         assert ctn.name == name
 
-    def test_init_docker_exception_reraises(self, mocker: MockFixture) -> None:
-        """Test that Docker connection errors are re-raised"""
+    def test_init_docker_exception_raises_runtime_error(self, mocker: MockFixture) -> None:
+        """Test that a Docker connection error raises RuntimeError with a helpful message"""
         mock_docker = mocker.patch("common_libs.containers.container.docker.from_env")
         mock_docker.side_effect = docker.errors.DockerException("Cannot connect to Docker daemon")
 
-        with pytest.raises(docker.errors.DockerException):
+        with pytest.raises(
+            RuntimeError, match=r"Unable to connect to the Docker daemon\. Is the docker daemon running on this host?"
+        ):
             BaseContainer(image="myimage")
 
     def test_container_property_initially_none(self) -> None:

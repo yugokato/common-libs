@@ -113,10 +113,10 @@ class BaseContainer:
             try:
                 self.docker_client = docker.from_env(timeout=timeout)
                 self.docker_client.ping()
-            except docker.errors.DockerException:
-                err = "ERROR: Unable to connect to the Docker daemon. Is the docker daemon running on this host?"
-                logger.error(err)
-                raise
+            except docker.errors.DockerException as e:
+                raise RuntimeError(
+                    "Unable to connect to the Docker daemon. Is the docker daemon running on this host?"
+                ) from e
 
         self.image = image
         self.tag = tag
