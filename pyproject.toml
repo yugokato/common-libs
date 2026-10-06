@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 64.0", "setuptools-scm>=8.0"]
+requires = ["setuptools>=69.0.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 
@@ -85,7 +85,7 @@ required-version = ">=0.12.5"
 where = ["src"]
 
 [tool.setuptools.package-data]
-common_libs = ["py.typed", "cfg/*"]
+common_libs = ["cfg/*"]
 
 [tool.ruff]
 line-length = 120
