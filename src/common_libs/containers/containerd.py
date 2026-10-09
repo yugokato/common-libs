@@ -1,20 +1,36 @@
-import shlex
+from __future__ import annotations
 
-import grpc
-from cri_api import (
-    Container,
-    ContainerFilter,
-    ExecSyncRequest,
-    ExecSyncResponse,
-    ListContainersRequest,
-    RuntimeServiceStub,
-)
+import shlex
 
 from common_libs.exceptions import CommandError, NotFound
 from common_libs.logging import get_logger
 
+try:
+    import grpc
+    from cri_api import (
+        Container,
+        ContainerFilter,
+        ExecSyncRequest,
+        ExecSyncResponse,
+        ListContainersRequest,
+        RuntimeServiceStub,
+    )
+except ImportError as e:
+    _IMPORT_ERROR: ImportError | None = e
+else:
+    _IMPORT_ERROR = None
+
 logger = get_logger(__name__)
 MAX_MESSAGE_LENGTH = 32 * 1024 * 1024  # 32MB
+
+
+def ensure_containerd_dependency() -> None:
+    """Raise a user-friendly error when the optional containerd dependency is not installed"""
+    if _IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "containerd runtime support requires optional containerd dependency: "
+            "Install common-libs with the 'containerd' extra (common-libs[containerd])"
+        ) from _IMPORT_ERROR
 
 
 class Containerd:
@@ -27,6 +43,7 @@ class Containerd:
     """
 
     def __init__(self, containerd_sock: str = "/run/containerd/containerd.sock", namespace: str = "k8s.io"):
+        ensure_containerd_dependency()
         self.containerd_sock = containerd_sock
         self.namespace = namespace
 

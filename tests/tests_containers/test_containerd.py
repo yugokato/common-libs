@@ -26,6 +26,12 @@ class TestContainerd:
         assert ctnd.containerd_sock == sock
         assert ctnd.namespace == namespace
 
+    @pytest.mark.usefixtures("mock_missing_containerd_dependency")
+    def test_init_raises_without_containerd_dependency(self) -> None:
+        """Test that a user-friendly RuntimeError is raised when the containerd dependency is not installed"""
+        with pytest.raises(RuntimeError, match="optional containerd dependency"):
+            Containerd()
+
     def test_get_containers_success(self, mock_grpc_stub: MagicMock, mocker: MockFixture) -> None:
         """Test successful container listing"""
         mock_container = mocker.MagicMock()

@@ -48,10 +48,13 @@ client = [
 ]
 http3 = ["aioquic~=1.3.0"]
 container = [
-    "container-runtime-interface-api==2.0.1",
     "docker==7.2.0",
 ]
-all = ["common-libs[client,http3,container]"]
+containerd = [
+    "common-libs[container]",
+    "container-runtime-interface-api==2.0.1",
+]
+all = ["common-libs[client,http3,container,containerd]"]
 
 [dependency-groups]
 lint = [

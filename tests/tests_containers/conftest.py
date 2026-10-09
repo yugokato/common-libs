@@ -21,6 +21,12 @@ def mock_register_exit_handler(mocker: MockFixture) -> MagicMock:
 
 
 @pytest.fixture
+def mock_missing_containerd_dependency(mocker: MockFixture) -> None:
+    """Simulate the optional containerd dependency not being installed"""
+    mocker.patch("common_libs.containers.containerd._IMPORT_ERROR", ImportError("No module named 'grpc'"))
+
+
+@pytest.fixture
 def mock_grpc_stub(mocker: MockFixture) -> MagicMock:
     """Patch grpc.insecure_channel and RuntimeServiceStub, return stub instance"""
     mock_insecure_channel = mocker.patch("common_libs.containers.containerd.grpc.insecure_channel")

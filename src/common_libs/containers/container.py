@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import re
 import shlex
@@ -6,7 +8,7 @@ import tarfile
 from collections.abc import Callable
 from functools import cached_property, wraps
 from pathlib import Path
-from typing import Any, ParamSpec, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, Self, TypeVar, cast
 
 import docker
 import docker.errors
@@ -18,8 +20,10 @@ from common_libs.files import create_tar_file
 from common_libs.logging import get_logger
 from common_libs.signals import register_exit_handler
 
-from .containerd import Container as ContainerdContainer
-from .containerd import Containerd
+from .containerd import Containerd, ensure_containerd_dependency
+
+if TYPE_CHECKING:
+    from .containerd import Container as ContainerdContainer
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -88,7 +92,8 @@ class BaseContainer:
     :param labels: Custom labels (The comma separated base label will be automatically prepended to each key). Labels
                    will be used to find a reusable container in addition to image:tag
     :param timeout: Default timeout for API calls, in seconds
-    :param is_containerd: The container is running in containerd runtime instead of dockerd
+    :param is_containerd: The container is running in containerd runtime instead of dockerd. This requires the optional
+                          `containerd` dependency
     :param enable_automatic_recovery_on_404: Automatically start a new container if a 404 Not Found is returned from
                                              the existing one. This option will be ignored if is_containerd is True
     """
@@ -106,6 +111,7 @@ class BaseContainer:
         enable_automatic_recovery_on_404: bool = False,
     ) -> None:
         if is_containerd:
+            ensure_containerd_dependency()
             if not name:
                 raise ValueError("The existing container name is required when is_containerd=True")
             self.docker_client = None

@@ -1,5 +1,7 @@
 """Tests for common_libs.containers.container module"""
 
+import subprocess
+import sys
 from unittest.mock import MagicMock
 
 import docker.errors
@@ -8,6 +10,8 @@ from pytest_mock import MockFixture
 
 from common_libs.containers.container import BaseContainer
 from common_libs.exceptions import CommandError
+
+MISSING_CONTAINERD_ERROR = "optional containerd dependency"
 
 
 class TestRequiresContainerDecorator:
@@ -97,6 +101,39 @@ class TestBaseContainerInit:
         """Test that container property is None before run()"""
         ctn = BaseContainer(image="alpine")
         assert ctn.container is None
+
+
+class TestMissingContainerdDependency:
+    """Tests for BaseContainer when the optional containerd dependency is not installed"""
+
+    @pytest.mark.usefixtures("mock_missing_containerd_dependency")
+    def test_init_containerd_mode_raises(self) -> None:
+        """Test that containerd mode raises a user-friendly RuntimeError at construction"""
+        with pytest.raises(RuntimeError, match=MISSING_CONTAINERD_ERROR):
+            BaseContainer(image="myimage", name="my-container", is_containerd=True)
+
+    @pytest.mark.usefixtures("mock_missing_containerd_dependency")
+    def test_init_dockerd_mode_succeeds(self) -> None:
+        """Test that dockerd mode is not affected by the missing containerd dependency"""
+        ctn = BaseContainer(image="myimage")
+        assert ctn.is_containerd is False
+
+    def test_import_succeeds(self) -> None:
+        """Test that the container module can be imported when grpc and cri_api are not installed"""
+        script = "\n".join(
+            [
+                "import sys",
+                "sys.modules['grpc'] = None",
+                "sys.modules['cri_api'] = None",
+                "from common_libs.containers.container import BaseContainer",
+                "BaseContainer(image='myimage', name='my-container', is_containerd=True)",
+            ]
+        )
+        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
+
+        # The friendly error (not an ImportError raised by the import itself) proves the module was imported
+        assert result.returncode != 0
+        assert MISSING_CONTAINERD_ERROR in result.stderr
 
 
 class TestBaseContainerRun:
