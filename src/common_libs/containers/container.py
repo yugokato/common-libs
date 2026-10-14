@@ -162,6 +162,17 @@ class BaseContainer:
         return Containerd()
 
     @requires_dockerd_runtime
+    @requires_container
+    def host_port(self, container_port: int) -> int:
+        """Return the port on the host that the container port is published on
+
+        :param container_port: The port inside the container
+        """
+        assert self.container is not None
+        bindings = self.container.ports[f"{container_port}/tcp"]
+        return int(next(binding["HostPort"] for binding in bindings if ":" not in binding["HostIp"]))
+
+    @requires_dockerd_runtime
     def run(
         self, detach: bool = True, remove: bool = True, stdin_open: bool = True, tty: bool = True, **kwargs: Any
     ) -> Self:

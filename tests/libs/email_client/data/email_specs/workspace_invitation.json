@@ -1,0 +1,21 @@
+{
+  "subject": "Inês Gonçalves invited you to join Growth Team São Paulo on Quillnest",
+  "sender": "Quillnest <noreply@mail.quillnest.example.net>",
+  "to": [
+    "qa+a71d4b96@example.com"
+  ],
+  "date": "2026-10-07T09:41:52+02:00",
+  "text_snippet": "Inês Gonçalves (ines.goncalves@example.net) invited you to join the Growth Team São Paulo workspace on Quillnest.",
+  "html_snippet": "<strong>Inês Gonçalves</strong> invited you to join the",
+  "link_texts": [
+    "",
+    "Growth Team São Paulo",
+    "Accept invitation",
+    "Help Center",
+    "Privacy Policy",
+    "Notification settings"
+  ],
+  "button_text": "Accept invitation",
+  "url": "https://app.quillnest.example.net/invitations/accept?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJpbnZfNVJqOHROMmNZdyIsIndvcmtzcGFjZSI6IndzXzdIYzJwUTl4TG0iLCJleHAiOjE3OTE5NjM3MTJ9.ogBtZ3zHrPy4LMZ1jPY24m_910kmr-5E1noxIopbY5E&workspace=ws_7Hc2pQ9xLm",
+  "logo_url": "https://quillnest.example.net/"
+}
