@@ -13,8 +13,8 @@ from pytest_mock import MockerFixture
 
 from common_libs.clients.email_client import EmailClient, PasswordAuth
 from common_libs.clients.email_client import client as client_module
+from tests.libs.common.fake_clock import FakeClock
 from tests.libs.email_client.emails import SENDER, TEMPLATE_READ_OPTIONS, read_template
-from tests.libs.email_client.fake_clock import FakeClock
 from tests.libs.email_client.fake_imap import HOST, PASSWORD, USERNAME, FakeIMAPServer
 from tests.libs.email_client.fixtures import email_address, password_reset, workspace_invitation  # noqa: F401
 

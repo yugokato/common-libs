@@ -140,8 +140,8 @@ def wait_until(
         # Stop when any result is returned
         stop_condition = lambda x: x is not None
 
-    start_time = time.time()
-    while time.time() - start_time < timeout:
+    start_time = time.monotonic()
+    while time.monotonic() - start_time < timeout:
         ret_val = func(*func_args, **func_kwargs)
         if stop_condition(ret_val):
             return ret_val

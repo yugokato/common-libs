@@ -137,6 +137,7 @@ class PostgreSQLClient:
                 min_size=1,
                 max_size=MAX_CONNECTIONS,
                 max_waiting=5,
+                open=True,
                 kwargs=dict(options=f"-c statement_timeout={self.statement_timeout}"),
             )
             register_exit_handler(self.disconnect)

@@ -110,6 +110,7 @@ class FakeConnection:
         self.challenge_replies: list[bytes | None] = []
         self.state = "NONAUTH"
         self.logged_out = False
+        self.closed = False
         self._server = server
 
     def login(self, user: str, password: str) -> Response:
@@ -160,10 +161,17 @@ class FakeConnection:
         raise imaplib.IMAP4.error(f"unsupported command {command}")
 
     def logout(self) -> Response:
+        """Like `imaplib.IMAP4.logout()`, the connection is only closed once the server has answered the command"""
         command = "LOGOUT"
         self._server.commands.append(command)
         self.logged_out = True
-        return self._server.take_scripted(command) or ("BYE", [b"Logging out"])
+        response = self._server.take_scripted(command) or ("BYE", [b"Logging out"])
+        self.shutdown()
+        return response
+
+    def shutdown(self) -> None:
+        """Close the connection"""
+        self.closed = True
 
     def _search(self, *criteria: str) -> Response:
         self._server.searches += 1

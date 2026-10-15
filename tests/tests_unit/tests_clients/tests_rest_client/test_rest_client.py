@@ -1,9 +1,12 @@
 """Tests for common_libs.clients.rest_client.rest_client module"""
 
 import asyncio
+import ssl
 from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
 
+import httpx2
 import pytest
 from pytest_mock import MockFixture
 
@@ -350,3 +353,31 @@ class TestAsyncRestClient:
         async with AsyncRestClient.http3("https://example.com") as client:
             assert isinstance(client, AsyncRestClient)
             assert isinstance(client.client._transport, H3Transport)
+
+    @pytest.fixture
+    def mock_http3_connect(self, mocker: MockFixture) -> MagicMock:
+        """Patch the aioquic connect() with one that yields a mock transport"""
+        mock_connect_ctx = mocker.MagicMock()
+        mock_connect_ctx.__aenter__ = mocker.AsyncMock(return_value=mocker.MagicMock(spec=httpx2.AsyncBaseTransport))
+        mock_connect_ctx.__aexit__ = mocker.AsyncMock(return_value=False)
+        return mocker.patch("aioquic.asyncio.client.connect", return_value=mock_connect_ctx)
+
+    @pytest.mark.parametrize(("verify", "verify_mode"), [(True, None), (False, ssl.CERT_NONE)], ids=["true", "false"])
+    async def test_http3_passes_verify_to_quic_configuration(
+        self, mock_http3_connect: MagicMock, verify: bool, verify_mode: ssl.VerifyMode | None
+    ) -> None:
+        """Test that http3() builds the QUIC configuration of the connection from the verify option"""
+        async with AsyncRestClient.http3("https://example.com", verify=verify):
+            pass
+
+        assert mock_http3_connect.call_args.kwargs["configuration"].verify_mode == verify_mode
+
+    async def test_http3_rejects_unsupported_verify(self, mock_http3_connect: MagicMock) -> None:
+        """Test that http3() raises TypeError for a verify value it cannot apply, without connecting"""
+        unsupported: Any = ssl.create_default_context()
+
+        with pytest.raises(TypeError, match="bool or a path to CA certificates, not SSLContext"):
+            async with AsyncRestClient.http3("https://example.com", verify=unsupported):
+                pass
+
+        mock_http3_connect.assert_not_called()

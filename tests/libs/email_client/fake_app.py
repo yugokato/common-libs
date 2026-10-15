@@ -8,9 +8,8 @@ from email.utils import make_msgid
 
 from pytest_data_loader import DataLoaderFixture
 
-from tests.libs.email_client.emails import get_template_path
-from tests.libs.email_client.mail_server import (
-    HOST,
+from tests.libs.containers.base import HOST
+from tests.libs.containers.mail_server import (
     PASSWORD,
     SOCKET_TIMEOUT,
     SUBMISSION_PORT,
@@ -18,6 +17,7 @@ from tests.libs.email_client.mail_server import (
     MailServerContainer,
     create_unverified_ssl_context,
 )
+from tests.libs.email_client.emails import get_template_path
 
 
 class FakeApp:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, Self, TypeVar
+from typing import TYPE_CHECKING, Any, Self, TypeVar
 from urllib.parse import urlparse
 
 from httpx2 import USE_CLIENT_DEFAULT
@@ -17,6 +17,9 @@ from .rate_limit import RateLimit
 from .retry import DEFAULT_RETRY_POLICY, RetryPolicy
 from .types import RestResponse
 from .utils import manage_content_type
+
+if TYPE_CHECKING:
+    import os
 
 ClientType = TypeVar("ClientType", "RestClient", "AsyncRestClient")
 
@@ -252,20 +255,25 @@ class AsyncRestClient(RestClientBase):
 
     @classmethod
     @asynccontextmanager
-    async def http3(cls, base_url: str, **kwargs: Any) -> AsyncGenerator[AsyncRestClient]:
+    async def http3(
+        cls, base_url: str, *, verify: bool | str | os.PathLike[str] = True, **kwargs: Any
+    ) -> AsyncGenerator[AsyncRestClient]:
         """Async context manager that yields an AsyncRestClient connected over HTTP/3.
 
         This is experimental/temporary until the official HTTP/3 support is added to httpx2
 
-        :param base_url: Base URL of the API (must use the https scheme).
+        :param base_url: Base URL of the API (must use the https scheme). Use a hostname such as `localhost` instead
+                         of an IP address when the server picks its certificate by the requested name
+        :param verify: `True` verifies the server certificate against the certifi CA bundle (not the system trust store
+                       that httpx2 uses), `False` disables the verification, and a path (`str` or `Path`) to a CA
+                       bundle file or directory verifies against only the CAs in it. An `ssl.SSLContext` is not
+                       supported
         :param kwargs: Additional keyword arguments forwarded to AsyncRestClient
         """
         try:
             from aioquic.asyncio.client import connect
-            from aioquic.h3.connection import H3_ALPN
-            from aioquic.quic.configuration import QuicConfiguration
 
-            from .http3 import H3Transport
+            from .http3 import H3Transport, create_quic_configuration
         except ImportError:
             raise RuntimeError(
                 "HTTP/3 client requires optional http3 dependency: Install with 'pip install common_libs[http3]'"
@@ -278,7 +286,7 @@ class AsyncRestClient(RestClientBase):
         async with connect(
             parsed.hostname,
             parsed.port or 443,
-            configuration=QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN),
+            configuration=create_quic_configuration(verify),
             create_protocol=H3Transport,
         ) as transport:
             async with cls(base_url, transport=transport, **kwargs) as client:

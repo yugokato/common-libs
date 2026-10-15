@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from pytest_mock import MockFixture
 
+from common_libs import utils as utils_module
 from common_libs.utils import (
     dedup,
     is_decorator_with_args,
@@ -16,8 +17,11 @@ from common_libs.utils import (
     prompt_confirmation,
     wait_until,
 )
+from tests.libs.common.fake_clock import FakeClock
 
 pytestmark = [pytest.mark.unittest]
+
+INTERVAL = 0.5
 
 
 class TestPromptConfirmation:
@@ -180,6 +184,14 @@ class TestDedup:
         assert isinstance(result, tuple)
 
 
+@pytest.fixture
+def fake_clock(mocker: MockFixture) -> FakeClock:
+    """A clock that replaces the real one in `wait_until`, so waits take no time and their sleeps can be checked"""
+    clock = FakeClock()
+    mocker.patch.object(utils_module, "time", new=clock)
+    return clock
+
+
 class TestWaitUntil:
     """Tests for wait_until function"""
 
@@ -189,7 +201,7 @@ class TestWaitUntil:
         result = wait_until(lambda: expected, timeout=1)
         assert result == expected
 
-    def test_wait_until_delayed_success(self) -> None:
+    def test_wait_until_delayed_success(self, fake_clock: FakeClock) -> None:
         """Test delayed success"""
         counter = [0]
         expected = "done"
@@ -198,13 +210,16 @@ class TestWaitUntil:
             counter[0] += 1
             return expected if counter[0] >= 2 else None
 
-        result = wait_until(func, interval=0.1, timeout=5)
+        result = wait_until(func, interval=INTERVAL, timeout=5)
         assert result == expected
+        assert fake_clock.sleeps == [INTERVAL]
 
-    def test_wait_until_timeout(self) -> None:
-        """Test timeout raises TimeoutError"""
+    def test_wait_until_timeout(self, fake_clock: FakeClock) -> None:
+        """Test timeout raises TimeoutError after polling at every interval until the deadline"""
         with pytest.raises(TimeoutError):
-            wait_until(lambda: None, interval=0.1, timeout=0.3)
+            wait_until(lambda: None, interval=INTERVAL, timeout=3 * INTERVAL)
+
+        assert fake_clock.sleeps == [INTERVAL] * 3
 
     def test_wait_until_with_args(self) -> None:
         """Test function with arguments"""
@@ -217,7 +232,7 @@ class TestWaitUntil:
         result = wait_until(lambda x=0: x, func_kwargs={"x": expected}, timeout=1)
         assert result == expected
 
-    def test_wait_until_custom_stop_condition(self) -> None:
+    def test_wait_until_custom_stop_condition(self, fake_clock: FakeClock) -> None:
         """Test custom stop condition"""
         counter = [0]
 
@@ -225,8 +240,9 @@ class TestWaitUntil:
             counter[0] += 1
             return counter[0]
 
-        result = wait_until(func, interval=0.1, timeout=5, stop_condition=lambda x: x >= 3)
+        result = wait_until(func, interval=INTERVAL, timeout=5, stop_condition=lambda x: x >= 3)
         assert result == 3
+        assert fake_clock.sleeps == [INTERVAL] * 2
 
 
 class TestIsDecoratorWithArgs:

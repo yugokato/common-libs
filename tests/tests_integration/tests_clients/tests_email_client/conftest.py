@@ -8,17 +8,17 @@ import pytest_data_loader
 from pytest_data_loader import DataLoaderFixture, make_data_loader_fixture
 
 from common_libs.clients.email_client import EmailClient, PasswordAuth
-from tests.libs.email_client.emails import PASSWORD_RESET, TEMPLATE_READ_OPTIONS, WORKSPACE_INVITATION, read_template
-from tests.libs.email_client.fake_app import FakeApp
-from tests.libs.email_client.fixtures import email_address, password_reset, workspace_invitation  # noqa: F401
-from tests.libs.email_client.mail_server import (
-    HOST,
+from tests.libs.containers.base import HOST
+from tests.libs.containers.mail_server import (
     IMAPS_PORT,
     PASSWORD,
     USERNAME,
     MailServerContainer,
     create_unverified_ssl_context,
 )
+from tests.libs.email_client.emails import PASSWORD_RESET, TEMPLATE_READ_OPTIONS, WORKSPACE_INVITATION, read_template
+from tests.libs.email_client.fake_app import FakeApp
+from tests.libs.email_client.fixtures import email_address, password_reset, workspace_invitation  # noqa: F401
 
 pytest_data_loader.register_reader(".eml", read_template, read_options=TEMPLATE_READ_OPTIONS)
 
@@ -28,7 +28,7 @@ data_loader = make_data_loader_fixture(scope="session")
 
 @pytest.fixture(scope="session")
 def mail_server(data_loader: DataLoaderFixture) -> Iterator[MailServerContainer]:
-    """A mail server with a mailbox that holds emails of earlier runs, started once per worker process"""
+    """A mail server with a mailbox that holds emails of earlier runs, started once per run"""
     with MailServerContainer() as container:
         fake_app = FakeApp(container, data_loader)
         for number, template in enumerate([PASSWORD_RESET, WORKSPACE_INVITATION, PASSWORD_RESET]):

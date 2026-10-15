@@ -1,19 +1,22 @@
 """Tests for common_libs.clients.rest_client.rate_limit module"""
 
 import json
-import time
 
 import httpx2
 import pytest
 from pytest_mock import MockFixture
 
 from common_libs.clients.rest_client import AsyncRestClient, RateLimit, RestClient
+from common_libs.clients.rest_client import rate_limit as rate_limit_module
 from common_libs.clients.rest_client.rate_limit import RateLimiter
 from common_libs.clients.rest_client.retry import RetryPolicy
+from tests.libs.common.fake_clock import FakeClock
 
 pytestmark = [pytest.mark.unittest]
 
 BASE_URL = "https://example.com"
+RATE_LIMIT = RateLimit(2, interval=1.0)
+TOKEN_WAIT = RATE_LIMIT.interval / RATE_LIMIT.max_requests
 
 
 def make_json_response(status_code: int, data: dict[str, object]) -> httpx2.Response:
@@ -107,26 +110,33 @@ class TestRateLimiter:
         assert limiter.try_acquire() == 0.0
 
 
+@pytest.fixture
+def fake_clock(mocker: MockFixture) -> FakeClock:
+    """A clock that replaces the real one in the rate limiter, so waits take no time and their sleeps can be checked"""
+    clock = FakeClock()
+    mocker.patch.object(rate_limit_module, "time", new=clock)
+    mocker.patch("asyncio.sleep", new=clock.async_sleep)
+    return clock
+
+
 class TestRestClientRateLimiting:
     """Tests for rate limiting applied through the REST clients"""
 
-    def test_sync_requests_throttled(self) -> None:
+    def test_sync_requests_throttled(self, fake_clock: FakeClock) -> None:
         """Test that sync requests beyond the budget are delayed by the rate limiter"""
         with RestClient(
             BASE_URL,
             retry_policy=None,
-            rate_limit=RateLimit(2, interval=0.2),
+            rate_limit=RATE_LIMIT,
             transport=httpx2.MockTransport(ok_handler),
         ) as client:
-            start = time.monotonic()
             for _ in range(4):
                 client.get("/api", quiet=True)
-            elapsed = time.monotonic() - start
 
-        # 4 requests with a budget of 2 per 0.2s: the 3rd and 4th each wait ~0.1s
-        assert elapsed >= 0.15
+        # 4 requests with a budget of 2: the 3rd and 4th each wait for a token
+        assert fake_clock.sleeps == [TOKEN_WAIT] * 2
 
-    def test_sync_requests_within_budget_not_throttled(self) -> None:
+    def test_sync_requests_within_budget_not_throttled(self, fake_clock: FakeClock) -> None:
         """Test that requests within the budget are not delayed"""
         with RestClient(
             BASE_URL,
@@ -134,29 +144,25 @@ class TestRestClientRateLimiting:
             rate_limit=RateLimit(10, interval=1.0),
             transport=httpx2.MockTransport(ok_handler),
         ) as client:
-            start = time.monotonic()
             for _ in range(3):
                 client.get("/api", quiet=True)
-            elapsed = time.monotonic() - start
 
-        assert elapsed < 0.1
+        assert fake_clock.sleeps == []
 
-    async def test_async_requests_throttled(self) -> None:
+    async def test_async_requests_throttled(self, fake_clock: FakeClock) -> None:
         """Test that async requests beyond the budget are delayed by the rate limiter"""
         async with AsyncRestClient(
             BASE_URL,
             retry_policy=None,
-            rate_limit=RateLimit(2, interval=0.2),
+            rate_limit=RATE_LIMIT,
             transport=httpx2.MockTransport(ok_handler),
         ) as client:
-            start = time.monotonic()
             for _ in range(4):
                 await client.get("/api", quiet=True)
-            elapsed = time.monotonic() - start
 
-        assert elapsed >= 0.15
+        assert fake_clock.sleeps == [TOKEN_WAIT] * 2
 
-    def test_retries_count_against_budget(self) -> None:
+    def test_retries_count_against_budget(self, fake_clock: FakeClock) -> None:
         """Test that automatic retries also pass the rate limiter"""
         num_requests = 0
 
@@ -170,14 +176,12 @@ class TestRestClientRateLimiting:
         with RestClient(
             BASE_URL,
             retry_policy=RetryPolicy(condition=503, num_retries=2, retry_after=0),
-            rate_limit=RateLimit(1, interval=0.15),
+            rate_limit=RateLimit(1, interval=TOKEN_WAIT),
             transport=httpx2.MockTransport(flaky_handler),
         ) as client:
-            start = time.monotonic()
             r = client.get("/api", quiet=True)
-            elapsed = time.monotonic() - start
 
-        # 3 sends (initial + 2 retries) with a budget of 1 per 0.15s: the 2nd and 3rd each wait ~0.15s
+        # 3 sends (initial + 2 retries) with a budget of 1: the 2nd and 3rd each wait for a token
         assert r.status_code == 200
         assert num_requests == 3
-        assert elapsed >= 0.25
+        assert fake_clock.sleeps == [TOKEN_WAIT] * 2

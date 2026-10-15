@@ -12,8 +12,8 @@ import pytest
 
 from common_libs.clients.email_client import EmailClient
 from common_libs.clients.email_client.client import SOCKET_TIMEOUT
+from tests.libs.common.fake_clock import FakeClock
 from tests.libs.email_client.addresses import generate_email_address
-from tests.libs.email_client.fake_clock import FakeClock
 from tests.libs.email_client.fake_imap import HOST, PASSWORD, USERNAME, FakeIMAPServer, Response
 
 pytestmark = [pytest.mark.unittest]
@@ -259,6 +259,27 @@ class TestWaitForEmail:
         assert client.wait_for_email(email_address).to == (email_address,)
         assert len(imap_server.connections) == 4
         assert all(connection.logged_out for connection in imap_server.connections)
+
+    @pytest.mark.parametrize(
+        "error",
+        [None, imaplib.IMAP4.abort("socket error: EOF"), ConnectionResetError(), TimeoutError()],
+        ids=["answered", "abort", "reset", "timeout"],
+    )
+    def test_closes_connection_even_when_logout_fails(
+        self,
+        client: EmailClient,
+        imap_server: FakeIMAPServer,
+        email_address: str,
+        send_email: Callable[..., int],
+        error: Exception | None,
+    ) -> None:
+        """Test that a connection is closed after the poll, including when the server dropped it before the logout"""
+        send_email(email_address)
+        imap_server.script("LOGOUT", error)
+
+        assert client.wait_for_email(email_address).to == (email_address,)
+        assert len(imap_server.connections) == 1
+        assert all(connection.closed for connection in imap_server.connections)
 
     def test_keeps_fetched_emails_across_reconnects(
         self,

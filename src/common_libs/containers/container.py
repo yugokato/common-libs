@@ -392,7 +392,10 @@ class BaseContainer:
         if extract_file:
             logger.info("Extracting file...")
             with tarfile.open(dest_gz_file_path, mode="r") as f:
-                f.extract(file_name, path=dest_dir_path)
+                if hasattr(tarfile, "data_filter"):
+                    f.extract(file_name, path=dest_dir_path, filter="data")
+                else:
+                    f.extract(file_name, path=dest_dir_path)
             logger.info(f"Extracted: {downloaded_file_path}")
             Path(dest_gz_file_path).unlink()
         return downloaded_file_path

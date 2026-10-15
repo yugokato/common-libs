@@ -2,6 +2,8 @@
 
 import subprocess
 import sys
+import tarfile
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import docker.errors
@@ -18,6 +20,7 @@ IPV4_HOST_IP = "0.0.0.0"
 IPV6_HOST_IP = "::"
 IPV4_HOST_PORT = 49153
 IPV6_HOST_PORT = 49154
+DOWNLOADED_FILE = "root.crt"
 
 
 def make_binding(host_ip: str, host_port: int) -> dict[str, str]:
@@ -365,3 +368,36 @@ class TestBaseContainerExecRun:
 
         result = ctn.exec_run("echo hello world", grep=grep_pattern)
         assert result is not None
+
+
+class TestBaseContainerDownloadFile:
+    """Tests for BaseContainer.download_file()"""
+
+    @pytest.mark.parametrize(
+        ("has_data_filter", "expected_kwargs"),
+        [(True, {"filter": "data"}), (False, {})],
+        ids=["with-data-filter", "without-data-filter"],
+    )
+    def test_passes_the_data_filter_only_when_tarfile_has_it(
+        self,
+        mocker: MockFixture,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        has_data_filter: bool,
+        expected_kwargs: dict[str, str],
+    ) -> None:
+        """Test that extract() gets the data filter only when tarfile supports it (Python 3.11.4 and later)"""
+        if has_data_filter:
+            monkeypatch.setattr(tarfile, "data_filter", mocker.Mock(), raising=False)
+        else:
+            monkeypatch.delattr(tarfile, "data_filter", raising=False)
+        container = mocker.MagicMock()
+        container.get_archive.return_value = ([b"archive"], {"name": DOWNLOADED_FILE})
+        ctn = BaseContainer(image="alpine", tag="latest")
+        ctn.container = container
+        tar = mocker.patch("common_libs.containers.container.tarfile.open").return_value.__enter__.return_value
+
+        downloaded = ctn.download_file(f"/data/{DOWNLOADED_FILE}", tmp_path)
+
+        tar.extract.assert_called_once_with(DOWNLOADED_FILE, path=tmp_path, **expected_kwargs)
+        assert downloaded == tmp_path / DOWNLOADED_FILE

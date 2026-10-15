@@ -314,5 +314,8 @@ def _quote(value: str) -> str:
 
 
 def _logout(conn: imaplib.IMAP4) -> None:
-    with suppress(OSError, imaplib.IMAP4.error):
+    try:
         conn.logout()
+    except (OSError, imaplib.IMAP4.error):
+        with suppress(OSError):
+            conn.shutdown()

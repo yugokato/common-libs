@@ -11,8 +11,8 @@ from typing import Any
 import pytest
 
 from common_libs.clients.email_client import Email, EmailClient, EmailClientError, EmailNotFoundError, PasswordAuth
+from tests.libs.common.fake_clock import FakeClock
 from tests.libs.email_client.emails import UNPARSABLE_HEADERS, build_email_with_unparsable_header
-from tests.libs.email_client.fake_clock import FakeClock
 from tests.libs.email_client.fake_imap import HOST, PASSWORD, USERNAME, FakeIMAPServer, Response
 
 pytestmark = [pytest.mark.unittest]

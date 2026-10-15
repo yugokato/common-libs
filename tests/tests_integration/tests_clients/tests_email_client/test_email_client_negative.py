@@ -8,11 +8,12 @@ from datetime import date, timedelta
 import pytest
 
 from common_libs.clients.email_client import EmailClient, EmailClientError, EmailNotFoundError, OAuth2Auth, PasswordAuth
+from tests.libs.containers.base import HOST
+from tests.libs.containers.mail_server import USERNAME, XDIST_GROUP
 from tests.libs.email_client.emails import EmailSpec
 from tests.libs.email_client.fake_app import FakeApp
-from tests.libs.email_client.mail_server import HOST, USERNAME
 
-pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(__name__)]
+pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(XDIST_GROUP)]
 
 # A privileged port that nothing listens on, which the random host ports of containers never take
 UNUSED_PORT = 1

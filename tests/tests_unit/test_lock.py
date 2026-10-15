@@ -5,12 +5,15 @@ import signal
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from common_libs.lock import LOCK_DIR, AsyncLock, Lock, _AsyncReentrantLock
 
 pytestmark = [pytest.mark.unittest]
+
+BARRIER_TIMEOUT = 10
 
 
 class TestLock:
@@ -61,31 +64,18 @@ class TestLock:
     def test_lock_different_names_no_conflict(self) -> None:
         """Test that locks with different names don't conflict (allow concurrent execution)"""
 
-        intervals: dict[str, tuple[float, float]] = {}
-        lock_hold_time = 0.1
+        both_holding = threading.Barrier(2, timeout=BARRIER_TIMEOUT)
 
         def acquire_lock(name: str) -> None:
             with Lock(name):
-                start = time.time()
-                time.sleep(lock_hold_time)
-                intervals[name] = (start, time.time())
+                both_holding.wait()
 
-        # Use different lock names - should allow concurrent execution
-        name_a, name_b = f"lock_a_{uuid.uuid4()}", f"lock_b_{uuid.uuid4()}"
-        t1 = threading.Thread(target=acquire_lock, args=(name_a,))
-        t2 = threading.Thread(target=acquire_lock, args=(name_b,))
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-
-        # If locks don't conflict, the two hold intervals overlap in time. If they conflicted
-        # (same lock), the intervals would be disjoint. Checking overlap rather than total
-        # duration keeps this robust when the system is generally slow (e.g. under parallel
-        # test execution), since overall slowness stretches both intervals together.
-        (start_a, end_a), (start_b, end_b) = intervals[name_a], intervals[name_b]
-        overlap = min(end_a, end_b) - max(start_a, start_b)
-        assert overlap > 0, f"Locks with different names should allow concurrent execution (no overlap: {intervals})"
+        # The barrier is reached only if both locks are held at the same time, however slowly each thread starts
+        names = [f"lock_{i}_{uuid.uuid4()}" for i in range(2)]
+        with ThreadPoolExecutor(max_workers=len(names)) as executor:
+            futures = [executor.submit(acquire_lock, name) for name in names]
+        for future in futures:
+            future.result()
 
     def test_lock_default_name(self) -> None:
         """Test lock with default name"""
@@ -209,23 +199,15 @@ class TestAsyncLock:
 
     async def test_async_lock_different_names_no_conflict(self) -> None:
         """Test that async locks with different names allow concurrent execution"""
-        lock_hold_time = 0.1
-        intervals: dict[str, tuple[float, float]] = {}
+        both_holding = asyncio.Barrier(2)
 
         async def acquire_lock(name: str) -> None:
             async with AsyncLock(name):
-                start = time.time()
-                await asyncio.sleep(lock_hold_time)
-                intervals[name] = (start, time.time())
+                await both_holding.wait()
 
-        name_a, name_b = f"async_lock_a_{uuid.uuid4()}", f"async_lock_b_{uuid.uuid4()}"
-        await asyncio.gather(acquire_lock(name_a), acquire_lock(name_b))
-
-        # See the sync counterpart (test_lock_different_names_no_conflict) for why overlap
-        # rather than total duration is checked.
-        (start_a, end_a), (start_b, end_b) = intervals[name_a], intervals[name_b]
-        overlap = min(end_a, end_b) - max(start_a, start_b)
-        assert overlap > 0, f"Locks with different names should allow concurrent execution (no overlap: {intervals})"
+        # The barrier is reached only if both locks are held at the same time, however slowly each task starts
+        names = [f"async_lock_{i}_{uuid.uuid4()}" for i in range(2)]
+        await asyncio.wait_for(asyncio.gather(*[acquire_lock(name) for name in names]), timeout=BARRIER_TIMEOUT)
 
     async def test_async_lock_reentrant_same_name(self) -> None:
         """Test that an async lock can be re-acquired within the same task without deadlocking."""

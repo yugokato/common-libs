@@ -50,13 +50,14 @@ class TestPostgreSQLClientConnection:
     """Tests for PostgreSQLClient connect/disconnect"""
 
     def test_connect_creates_pool(self, mock_connection_pool: MagicMock) -> None:
-        """Test that connect() creates a ConnectionPool"""
+        """Test that connect() creates a ConnectionPool that is opened explicitly"""
         client = PostgreSQLClient(host="pg-conn1", port=5432, db_name="conndb1", user="conn_u1", password="conn_p1")
         assert client._connection_pool is None
 
         client.connect()
         # Verify pool was created
         mock_connection_pool.assert_called_once()
+        assert mock_connection_pool.call_args.kwargs["open"] is True
         assert client._connection_pool is not None
 
     def test_connect_skips_if_already_connected(self, mock_connection_pool: MagicMock) -> None:

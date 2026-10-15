@@ -1,12 +1,16 @@
 import asyncio
+import os
+import ssl
 from collections import deque
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import httpx2
 from aioquic.asyncio.protocol import QuicConnectionProtocol
-from aioquic.h3.connection import H3Connection
+from aioquic.h3.connection import H3_ALPN, H3Connection
 from aioquic.h3.events import DataReceived, H3Event, Headers, HeadersReceived
+from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import QuicEvent
 
 from common_libs.logging import get_logger
@@ -166,3 +170,27 @@ class H3Transport(QuicConnectionProtocol, httpx2.AsyncBaseTransport):
         if not self._read_queue[stream_id]:
             self._read_ready[stream_id].clear()
         return event
+
+
+def create_quic_configuration(verify: bool | str | os.PathLike[str] = True) -> QuicConfiguration:
+    """Create the QUIC configuration of an HTTP/3 client connection.
+
+    :param verify: `True` verifies the server certificate against the certifi CA bundle (not the system trust store),
+                   `False` disables the verification, and a path (`str` or `Path`) to a CA bundle file or directory
+                   verifies against only the CAs in it
+    """
+    configuration = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+    if isinstance(verify, str | os.PathLike):
+        path = Path(verify)
+        if not path.exists():
+            raise FileNotFoundError(f"The CA certificates path does not exist: {verify}")
+        if path.is_dir():
+            configuration.load_verify_locations(capath=os.fspath(verify))
+        else:
+            configuration.load_verify_locations(cafile=os.fspath(verify))
+    elif isinstance(verify, bool):
+        if not verify:
+            configuration.verify_mode = ssl.CERT_NONE
+    else:
+        raise TypeError(f"verify must be a bool or a path to CA certificates, not {type(verify).__name__}")
+    return configuration

@@ -7,12 +7,12 @@ from datetime import date, timedelta
 import pytest
 
 from common_libs.clients.email_client import EmailClient, OAuth2Auth
+from tests.libs.containers.mail_server import ACCESS_TOKEN, XDIST_GROUP, MailServerContainer
 from tests.libs.email_client.addresses import generate_email_address
 from tests.libs.email_client.emails import EmailSpec, parametrize_email_specs
 from tests.libs.email_client.fake_app import FakeApp
-from tests.libs.email_client.mail_server import ACCESS_TOKEN, MailServerContainer
 
-pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(__name__)]
+pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(XDIST_GROUP)]
 
 SEND_DELAY = 0.2
 ONE_DAY = timedelta(days=1)

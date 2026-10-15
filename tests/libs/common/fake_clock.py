@@ -1,6 +1,10 @@
 class FakeClock:
     """A stand-in for the `time` module that only moves forward when something sleeps
 
+    Patch it over the `time` attribute of the module under test. For async code, also patch `asyncio.sleep` with
+    `async_sleep()`. The clock moves only by the sleeps, so use durations that are exact in binary (0.5 or 1.0, not
+    0.15). Otherwise a rounding error can make a wait that computes its sleep spin until `max_reads` is hit.
+
     :param max_reads: The number of readings after which the clock raises, so that a wait that never ends fails instead
                       of hanging
     """
@@ -25,3 +29,10 @@ class FakeClock:
         """
         self.sleeps.append(seconds)
         self._now += seconds
+
+    async def async_sleep(self, seconds: float) -> None:
+        """Move the clock forward like `sleep()` without yielding to the event loop
+
+        :param seconds: The duration to sleep
+        """
+        self.sleep(seconds)
