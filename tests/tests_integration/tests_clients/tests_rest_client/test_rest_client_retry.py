@@ -1,12 +1,12 @@
 """Integration tests for the retry and rate limit features of common_libs.clients.rest_client"""
 
-import time
 from collections.abc import Callable
 
 import httpx2
 import pytest
 
 from common_libs.clients.rest_client import BackoffStrategy, RateLimit, RestClient, RetryPolicy
+from tests.libs.common.fake_clock import FakeClock
 from tests.libs.containers.mock_server import XDIST_GROUP, MockResponse, MockServerContainer
 
 pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(XDIST_GROUP)]
@@ -14,6 +14,9 @@ pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(XDIST_GROUP)]
 # The default policy waits 5 seconds between the attempts, which would make the tests slow
 RETRY_DELAY = 0.05
 RETRY_AFTER_SECONDS = 1.0
+RATE_LIMIT_REQUESTS = 2
+RATE_LIMIT_INTERVAL = 1.0
+TOKEN_WAIT = RATE_LIMIT_INTERVAL / RATE_LIMIT_REQUESTS
 SERVER_BUSY = MockResponse(status=503)
 SUCCESS = MockResponse(body={"ok": True})
 
@@ -42,7 +45,7 @@ class TestRetry:
         client_factory: Callable[..., RestClient],
         mock_server: MockServerContainer,
         path: str,
-        caplog: pytest.LogCaptureFixture,
+        fake_clock: FakeClock,
         honor_retry_after: bool,
         expected_wait: float,
     ) -> None:
@@ -50,13 +53,11 @@ class TestRetry:
         mock_server.expect(path, MockResponse(status=503, headers={"Retry-After": f"{RETRY_AFTER_SECONDS:g}"}), SUCCESS)
         strategy = BackoffStrategy(base=RETRY_DELAY, jitter=False, honor_retry_after=honor_retry_after)
         client = client_factory(retry_policy=RetryPolicy(retry_after=strategy))
-        started = time.monotonic()
 
         response = client.get(path)
 
         assert response.status_code == 200
-        assert f"Retrying in {expected_wait} seconds" in caplog.text
-        assert time.monotonic() - started >= expected_wait
+        assert fake_clock.sleeps == [expected_wait], "The client did not wait as long as the retry strategy decides"
 
     @pytest.mark.parametrize(
         ("safe_methods_only", "status_code", "attempts"), [(True, 503, 1), (False, 200, 2)], ids=["safe", "any"]
@@ -78,14 +79,15 @@ class TestRetry:
 
         assert (response.status_code, len(mock_server.received(path))) == (status_code, attempts)
 
-    def test_request_is_retried_after_a_timeout(
+    def test_request_is_retried_after_the_connection_is_dropped(
         self, client_factory: Callable[..., RestClient], mock_server: MockServerContainer, path: str
     ) -> None:
-        """Test that an exception named in the retry condition, here a read timeout, is retried"""
-        mock_server.expect(path, MockResponse(delay=2.0), SUCCESS)
-        policy = RetryPolicy(condition=httpx2.ReadTimeout, retry_after=RETRY_DELAY)
+        """Test that an exception named in the retry condition, here the error of a dropped connection, is retried"""
+        mock_server.expect_dropped_connection(path, times=1)
+        mock_server.expect(path, SUCCESS)
+        policy = RetryPolicy(condition=httpx2.RemoteProtocolError, retry_after=RETRY_DELAY)
 
-        response = client_factory(retry_policy=policy, timeout=httpx2.Timeout(5.0, read=0.5)).get(path)
+        response = client_factory(retry_policy=policy).get(path)
 
         assert (response.status_code, len(mock_server.received(path))) == (200, 2)
 
@@ -94,16 +96,17 @@ class TestRateLimit:
     """Tests for the client-side rate limit of RestClient against a real server"""
 
     def test_requests_over_the_limit_wait_for_the_bucket_to_refill(
-        self, client_factory: Callable[..., RestClient], mock_server: MockServerContainer, path: str
+        self,
+        client_factory: Callable[..., RestClient],
+        mock_server: MockServerContainer,
+        path: str,
+        fake_clock: FakeClock,
     ) -> None:
         """Test that a burst of 2 requests passes at once and the next two wait for tokens at 2 requests per second"""
         mock_server.expect(path)
-        client = client_factory(rate_limit=RateLimit(max_requests=2, interval=1.0))
-        started = time.monotonic()
+        client = client_factory(rate_limit=RateLimit(max_requests=RATE_LIMIT_REQUESTS, interval=RATE_LIMIT_INTERVAL))
 
-        responses = [client.get(path) for _ in range(4)]
+        responses = [client.get(path) for _ in range(RATE_LIMIT_REQUESTS + 2)]
 
-        assert ([response.status_code for response in responses], time.monotonic() - started >= 0.9) == (
-            [200] * 4,
-            True,
-        )
+        assert [response.status_code for response in responses] == [200] * (RATE_LIMIT_REQUESTS + 2)
+        assert fake_clock.sleeps == [TOKEN_WAIT] * 2, "The requests over the limit did not wait for a new token each"

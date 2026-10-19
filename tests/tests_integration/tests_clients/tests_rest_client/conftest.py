@@ -7,12 +7,27 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pytest_mock import MockerFixture
 
 from common_libs.clients.rest_client import AsyncRestClient, RestClient
+from common_libs.clients.rest_client import rate_limit as rate_limit_module
+from common_libs.clients.rest_client import retry as retry_module
+from tests.libs.common.fake_clock import FakeClock
 from tests.libs.containers.http3_proxy import Http3ProxyContainer
 from tests.libs.containers.mock_server import MockServerContainer
 
 CLIENT_TIMEOUT = 10.0
+
+
+@pytest.fixture
+def fake_clock(mocker: MockerFixture) -> FakeClock:
+    """A clock that replaces the real one in the retry policy and the rate limiter, so that waits take no time and
+    their sleeps can be checked
+    """
+    clock = FakeClock()
+    mocker.patch.object(retry_module, "time", new=clock)
+    mocker.patch.object(rate_limit_module, "time", new=clock)
+    return clock
 
 
 @pytest.fixture(scope="session")

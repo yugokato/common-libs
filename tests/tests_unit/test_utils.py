@@ -195,11 +195,12 @@ def fake_clock(mocker: MockFixture) -> FakeClock:
 class TestWaitUntil:
     """Tests for wait_until function"""
 
-    def test_wait_until_immediate_success(self) -> None:
+    def test_wait_until_immediate_success(self, fake_clock: FakeClock) -> None:
         """Test immediate success"""
         expected = 42
         result = wait_until(lambda: expected, timeout=1)
         assert result == expected
+        assert fake_clock.sleeps == []
 
     def test_wait_until_delayed_success(self, fake_clock: FakeClock) -> None:
         """Test delayed success"""
@@ -221,16 +222,18 @@ class TestWaitUntil:
 
         assert fake_clock.sleeps == [INTERVAL] * 3
 
-    def test_wait_until_with_args(self) -> None:
+    def test_wait_until_with_args(self, fake_clock: FakeClock) -> None:
         """Test function with arguments"""
         result = wait_until(lambda x, y: x + y, func_args=(1, 2), timeout=1)
         assert result == 3
+        assert fake_clock.sleeps == []
 
-    def test_wait_until_with_kwargs(self) -> None:
+    def test_wait_until_with_kwargs(self, fake_clock: FakeClock) -> None:
         """Test function with keyword arguments"""
         expected = 10
         result = wait_until(lambda x=0: x, func_kwargs={"x": expected}, timeout=1)
         assert result == expected
+        assert fake_clock.sleeps == []
 
     def test_wait_until_custom_stop_condition(self, fake_clock: FakeClock) -> None:
         """Test custom stop condition"""

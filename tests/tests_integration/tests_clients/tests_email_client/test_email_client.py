@@ -7,27 +7,40 @@ from datetime import date, timedelta
 import pytest
 
 from common_libs.clients.email_client import EmailClient, OAuth2Auth
-from tests.libs.containers.mail_server import ACCESS_TOKEN, XDIST_GROUP, MailServerContainer
+from tests.libs.containers.mail_server import ACCESS_TOKEN, DELIVERY_TIMEOUT, XDIST_GROUP, MailServerContainer
 from tests.libs.email_client.addresses import generate_email_address
 from tests.libs.email_client.emails import EmailSpec, parametrize_email_specs
 from tests.libs.email_client.fake_app import FakeApp
 
 pytestmark = [pytest.mark.integrationtest, pytest.mark.xdist_group(XDIST_GROUP)]
 
-SEND_DELAY = 0.2
+CONCURRENT_WAIT_TIMEOUT = 2 * DELIVERY_TIMEOUT
 ONE_DAY = timedelta(days=1)
 
 
 class TestWaitForEmail:
     """Tests for `EmailClient.wait_for_email()` against a real IMAP server"""
 
-    @pytest.mark.parametrize("delay", [0, SEND_DELAY], ids=["sent-before-waiting", "sent-while-waiting"])
+    @pytest.mark.parametrize("sent_while_waiting", [False, True], ids=["sent-before-waiting", "sent-while-waiting"])
     @parametrize_email_specs
     def test_returns_link_of_the_main_button(
-        self, client: EmailClient, app: FakeApp, email_address: str, spec: EmailSpec, delay: float
+        self,
+        client: EmailClient,
+        app: FakeApp,
+        run_while_waiting: Callable[[Callable[[], object]], None],
+        email_address: str,
+        spec: EmailSpec,
+        sent_while_waiting: bool,
     ) -> None:
         """Test that the main button link is returned whether the email was sent before or after waiting started"""
-        app.send_email(spec.name, email_address, delay=delay)
+
+        def send_email() -> None:
+            app.send_email(spec.name, email_address)
+
+        if sent_while_waiting:
+            run_while_waiting(send_email)
+        else:
+            send_email()
 
         email = client.wait_for_email(email_address, subject=spec.subject)
 
@@ -78,12 +91,21 @@ class TestWaitForEmail:
         assert client.wait_for_email(email_address).subject == workspace_invitation.subject
 
     def test_waits_for_resent_email(
-        self, client: EmailClient, app: FakeApp, email_address: str, password_reset: EmailSpec
+        self,
+        client: EmailClient,
+        app: FakeApp,
+        run_while_waiting: Callable[[Callable[[], object]], None],
+        email_address: str,
+        password_reset: EmailSpec,
     ) -> None:
         """Test that an email sent again is returned when waiting for an email after the first one"""
-        app.send_email(password_reset.name, email_address)
+
+        def send_email() -> None:
+            app.send_email(password_reset.name, email_address)
+
+        send_email()
         first = client.wait_for_email(email_address)
-        app.send_email(password_reset.name, email_address, delay=SEND_DELAY)
+        run_while_waiting(send_email)
 
         second = client.wait_for_email(email_address, after=first)
 
@@ -93,9 +115,9 @@ class TestWaitForEmail:
     @pytest.mark.parametrize("client_per_machine", [False, True], ids=["one-client", "client-per-machine"])
     def test_serves_concurrent_waits(
         self,
-        client: EmailClient,
         client_factory: Callable[..., EmailClient],
         app: FakeApp,
+        run_while_waiting: Callable[[Callable[[], object]], None],
         password_reset: EmailSpec,
         workspace_invitation: EmailSpec,
         client_per_machine: bool,
@@ -104,20 +126,26 @@ class TestWaitForEmail:
         one each (as the same test running on different machines does), even when the emails arrive in the reverse
         order of the waits
         """
-        specs = [password_reset, workspace_invitation] * 4
-        cases = [
-            (generate_email_address("signup"), spec, 0.05 * (len(specs) - index)) for index, spec in enumerate(specs)
-        ]
+        cases = [(generate_email_address("signup"), spec) for spec in [password_reset, workspace_invitation] * 4]
 
-        def wait_for_email(email_address: str, spec: EmailSpec, delay: float) -> tuple[tuple[str, ...], str]:
-            app.send_email(spec.name, email_address, delay=delay)
-            email = (client_factory() if client_per_machine else client).wait_for_email(email_address)
+        def send_emails_in_reverse_order() -> None:
+            for email_address, spec in reversed(cases):
+                app.send_email(spec.name, email_address)
+
+        # The first wait that pauses sends the emails, while the other waits poll. The timeout covers all the sends
+        run_while_waiting(send_emails_in_reverse_order)
+        shared_client = client_factory(timeout=CONCURRENT_WAIT_TIMEOUT)
+
+        def wait_for_email(case: tuple[str, EmailSpec]) -> tuple[tuple[str, ...], str]:
+            email_address, spec = case
+            waiting_client = client_factory(timeout=CONCURRENT_WAIT_TIMEOUT) if client_per_machine else shared_client
+            email = waiting_client.wait_for_email(email_address)
             return email.to, email.get_link(spec.button_text)
 
-        with ThreadPoolExecutor(max_workers=len(cases)) as pool:
-            results = list(pool.map(lambda case: wait_for_email(*case), cases))
+        with ThreadPoolExecutor(max_workers=len(cases)) as executor:
+            results = list(executor.map(wait_for_email, cases))
 
-        assert results == [((address,), spec.url) for address, spec, _ in cases]
+        assert results == [((address,), spec.url) for address, spec in cases], "A wait got the email of another address"
 
     def test_returns_email_received_since_a_day_ago(
         self, client: EmailClient, app: FakeApp, email_address: str, password_reset: EmailSpec

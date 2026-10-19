@@ -74,8 +74,10 @@ def fake_clock(mocker: MockerFixture) -> FakeClock:
 
 
 @pytest.fixture
-def client_factory(imap_server: FakeIMAPServer) -> Callable[..., EmailClient]:
-    """Create a client for the in-memory server that polls quickly. Keyword arguments override the defaults"""
+def client_factory(imap_server: FakeIMAPServer, fake_clock: FakeClock) -> Callable[..., EmailClient]:
+    """Create a client for the in-memory server that waits on the fake clock, so no wait takes time. Keyword arguments
+    override the defaults
+    """
 
     def _make_client(**kwargs: Any) -> EmailClient:
         params: dict[str, Any] = {
@@ -83,7 +85,7 @@ def client_factory(imap_server: FakeIMAPServer) -> Callable[..., EmailClient]:
             "username": USERNAME,
             "auth": PasswordAuth(PASSWORD),
             "timeout": 2.0,
-            "poll_interval": 0.01,
+            "poll_interval": 0.5,
         }
         return EmailClient(**params | kwargs)
 
@@ -92,7 +94,7 @@ def client_factory(imap_server: FakeIMAPServer) -> Callable[..., EmailClient]:
 
 @pytest.fixture
 def client(client_factory: Callable[..., EmailClient]) -> EmailClient:
-    """A client for the in-memory server that polls quickly"""
+    """A client for the in-memory server that waits on the fake clock"""
     return client_factory()
 
 

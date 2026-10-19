@@ -20,6 +20,12 @@ ACCESS_TOKEN = "ya29.integration-test-token"
 SUBMISSION_PORT = 587
 IMAPS_PORT = 993
 IDP_PORT = 8080
+IDP_URL = f"http://127.0.0.1:{IDP_PORT}/userinfo"
+# Validates the access token at the identity provider like the mail server does. Fails until the provider answers
+IDP_CHECK_SCRIPT = (
+    "import urllib.request as r; "
+    f"r.urlopen(r.Request('{IDP_URL}', headers={{'Authorization': 'Bearer {ACCESS_TOKEN}'}}))"
+)
 IDP_SCRIPT = Path(__file__).parents[1] / "email_client" / "fake_idp.py"
 DOVECOT_LOCAL_CONFIG = "/etc/dovecot/local.conf"
 DOVECOT_SETTINGS = ("auth_failure_delay = 0", "mail_max_userip_connections = 100")
@@ -40,7 +46,7 @@ SERVICES_NOT_NEEDED = (
 )
 ENVIRONMENT = {
     "ENABLE_OAUTH2": "1",
-    "OAUTH2_INTROSPECTION_URL": f"http://127.0.0.1:{IDP_PORT}/userinfo",
+    "OAUTH2_INTROSPECTION_URL": IDP_URL,
     "SSL_TYPE": "snakeoil",
     **dict.fromkeys(SERVICES_NOT_NEEDED, "0"),
 }
@@ -150,6 +156,7 @@ class MailServerContainer(ServiceContainer):
         return [
             self._add_account,
             self._start_fake_idp,
+            self._check_fake_idp,
             self._configure_dovecot,
             self._check_imaps,
             self._check_submission,
@@ -163,6 +170,9 @@ class MailServerContainer(ServiceContainer):
         self.exec_run(
             f"python3 {self.tmp_dir}/{IDP_SCRIPT.name} {ACCESS_TOKEN} {USERNAME} {IDP_PORT}", detach=True, quiet=True
         )
+
+    def _check_fake_idp(self) -> None:
+        self.exec_run(f"python3 -c {shlex.quote(IDP_CHECK_SCRIPT)}", quiet=True)
 
     def _configure_dovecot(self) -> None:
         settings = " ".join(shlex.quote(setting) for setting in DOVECOT_SETTINGS)

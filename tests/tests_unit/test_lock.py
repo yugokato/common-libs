@@ -1,113 +1,115 @@
 """Tests for common_libs.lock module"""
 
 import asyncio
-import signal
 import threading
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from filelock import Timeout
 
 from common_libs.lock import LOCK_DIR, AsyncLock, Lock, _AsyncReentrantLock
 
 pytestmark = [pytest.mark.unittest]
 
-BARRIER_TIMEOUT = 10
+# Seconds a wait may take before the test gives up. A passing test never waits this long
+WAIT_TIMEOUT = 10.0
+
+
+@pytest.fixture
+def lock_name_factory() -> Iterator[Callable[[], str]]:
+    """Create lock names that are unique to the test, and remove their lock files afterwards"""
+    names: list[str] = []
+
+    def _make_name() -> str:
+        names.append(f"test_{uuid.uuid4().hex}")
+        return names[-1]
+
+    yield _make_name
+
+    for name in names:
+        (LOCK_DIR / f"{name}.lock").unlink(missing_ok=True)
+
+
+@pytest.fixture
+def lock_name(lock_name_factory: Callable[[], str]) -> str:
+    """A lock name that is unique to the test, so that no other test or process holds the lock"""
+    return lock_name_factory()
 
 
 class TestLock:
     """Tests for Lock class"""
 
-    def test_lock_context_manager(self) -> None:
+    def test_lock_context_manager(self, lock_name: str) -> None:
         """Test using Lock as context manager"""
-        with Lock("test_lock_context") as lock:
+        with Lock(lock_name) as lock:
             assert lock is not None
 
-    def test_lock_creates_lock_directory(self) -> None:
+    def test_lock_creates_lock_directory(self, lock_name: str) -> None:
         """Test that lock directory is created"""
-        with Lock("test_dir_creation"):
+        with Lock(lock_name):
             assert LOCK_DIR.exists()
 
-    def test_lock_creates_lock_file(self) -> None:
+    def test_lock_creates_lock_file(self, lock_name: str) -> None:
         """Test that lock file is created"""
-        lock_name = "test_file_creation"
         with Lock(lock_name):
             lock_file = LOCK_DIR / f"{lock_name}.lock"
             assert lock_file.exists()
 
-    def test_lock_mutual_exclusion(self) -> None:
-        """Test that locks provide mutual exclusion"""
-        # Use a read-modify-write pattern that requires mutual exclusion
-        # Without lock, race conditions would cause lost updates
-        shared_counter = {"value": 0}
-        lock_name = "test_mutex"
+    def test_lock_mutual_exclusion(self, lock_name: str) -> None:
+        """Test that only one thread at a time can hold a lock"""
+        counter = 0
 
         def increment_with_lock() -> None:
-            with Lock(lock_name, timeout=5):
-                # Read-modify-write (not atomic without lock)
-                current = shared_counter["value"]
-                time.sleep(0.01)  # Small delay to ensure overlap attempts
-                shared_counter["value"] = current + 1
+            nonlocal counter
+            with Lock(lock_name, timeout=WAIT_TIMEOUT):
+                current = counter
+                time.sleep(0.01)  # Widens the window in which a broken lock lets another thread in
+                counter = current + 1
 
         num_threads = 5
-        threads = [threading.Thread(target=increment_with_lock) for _ in range(num_threads)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        # With proper locking, all increments should be preserved
-        # Without lock, some updates would be lost due to race conditions
-        assert shared_counter["value"] == num_threads
-
-    def test_lock_different_names_no_conflict(self) -> None:
-        """Test that locks with different names don't conflict (allow concurrent execution)"""
-
-        both_holding = threading.Barrier(2, timeout=BARRIER_TIMEOUT)
-
-        def acquire_lock(name: str) -> None:
-            with Lock(name):
-                both_holding.wait()
-
-        # The barrier is reached only if both locks are held at the same time, however slowly each thread starts
-        names = [f"lock_{i}_{uuid.uuid4()}" for i in range(2)]
-        with ThreadPoolExecutor(max_workers=len(names)) as executor:
-            futures = [executor.submit(acquire_lock, name) for name in names]
+        with ThreadPoolExecutor(max_workers=num_threads) as executor:
+            futures = [executor.submit(increment_with_lock) for _ in range(num_threads)]
         for future in futures:
             future.result()
 
-    def test_lock_default_name(self) -> None:
-        """Test lock with default name"""
-        with Lock() as lock:
-            assert lock.name == "lock"
+        assert counter == num_threads, "Increments were lost, so threads held the lock at the same time"
 
-    def test_lock_with_timeout(self) -> None:
+    def test_lock_excludes_other_threads(self, lock_name: str) -> None:
+        """Test that a lock held by one thread cannot be taken by another thread until it is released"""
+        with Lock(lock_name, timeout=0):
+            taken_while_held = _try_acquire_in_another_thread(lock_name)
+        taken_after_release = _try_acquire_in_another_thread(lock_name)
+
+        assert not taken_while_held, "Another thread took the lock while it was held"
+        assert taken_after_release, "The lock could not be taken after it was released"
+
+    def test_lock_different_names_no_conflict(self, lock_name_factory: Callable[[], str]) -> None:
+        """Test that a lock can be taken while a lock with a different name is held"""
+        with Lock(lock_name_factory(), timeout=0):
+            taken = _try_acquire_in_another_thread(lock_name_factory())
+
+        assert taken, "A lock with a different name could not be taken while the first one was held"
+
+    def test_lock_default_name(self) -> None:
+        """Test that a lock without a name uses the default name and lock file"""
+        lock = Lock()
+        assert (lock.name, lock._lock_file.name) == ("lock", "lock.lock")
+
+    def test_lock_with_timeout(self, lock_name: str) -> None:
         """Test lock with custom timeout"""
         # Just verify it doesn't raise immediately
-        with Lock("test_timeout", timeout=1):
+        with Lock(lock_name, timeout=1):
             pass
 
-    def test_lock_reentrant_same_thread(self) -> None:
+    def test_lock_reentrant_same_thread(self, lock_name: str) -> None:
         """Test that lock can be re-acquired in same thread (FileLock is reentrant)"""
+        with Lock(lock_name, timeout=0):
+            taken_again = _try_acquire(lock_name)
 
-        def timeout_handler(signum: int, frame: object) -> None:
-            raise TimeoutError("Deadlock detected: Lock is not reentrant")
-
-        lock_name = "test_reentrant"
-
-        # Set a 2-second timeout
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(2)
-
-        try:
-            with Lock(lock_name):
-                with Lock(lock_name):
-                    pass  # Should not deadlock
-        finally:
-            # Cancel the alarm and restore original handler
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
+        assert taken_again, "The thread that holds the lock could not take it again"
 
     def test_lock_settings_preserved_after_file_not_found_fallback(self) -> None:
         """Test that Lock reuses its FileLock instance with original settings after a FileNotFoundError."""
@@ -162,52 +164,38 @@ class TestAsyncLock:
 
         assert shared_counter["value"] == num_tasks
 
-    async def test_async_lock_does_not_block_event_loop(self) -> None:
-        """Test that waiting to acquire an async lock does not block the event loop"""
-        lock_name = f"test_async_nonblocking_{uuid.uuid4()}"
-        tick_times: list[float] = []
-        wait_window: list[float] = []
+    async def test_async_lock_does_not_block_event_loop(self, lock_name: str) -> None:
+        """Test that waiting for an async lock that another thread holds does not block the event loop"""
+        lock_held, loop_ran = threading.Event(), threading.Event()
 
-        async def heartbeat() -> None:
-            while True:
-                tick_times.append(time.time())
-                await asyncio.sleep(0.01)
+        def hold_lock() -> bool:
+            with Lock(lock_name, timeout=WAIT_TIMEOUT):
+                lock_held.set()
+                return loop_ran.wait(WAIT_TIMEOUT)
 
-        async def holder() -> None:
+        async def take_lock() -> None:
             async with AsyncLock(lock_name):
-                await asyncio.sleep(0.2)
+                pass
 
-        async def waiter() -> None:
-            await asyncio.sleep(0.02)  # Ensure holder grabs lock first
-            wait_window.append(time.time())
-            async with AsyncLock(lock_name):
-                wait_window.append(time.time())
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            holder = executor.submit(hold_lock)
+            assert lock_held.wait(WAIT_TIMEOUT), "The holder thread did not get the lock"
+            waiter = asyncio.create_task(take_lock())
+            await asyncio.sleep(0)  # Lets the waiter run until it waits for the lock
+            waited = not waiter.done()
+            loop_ran.set()
+            await waiter
 
-        hb_task = asyncio.create_task(heartbeat())
-        try:
-            await asyncio.gather(holder(), waiter())
-        finally:
-            hb_task.cancel()
+        assert holder.result(), "The event loop was blocked while the async lock waited"
+        assert waited, "The async lock was taken while another thread held it"
 
-        # If the loop was blocked while the waiter contended for the lock, no heartbeat tick
-        # could land inside that window. Checking for a tick within the window (rather than a
-        # total tick count against a fixed duration) keeps this robust when the whole process
-        # is scheduled slowly under system load.
-        wait_start, wait_end = wait_window
-        ticks_while_waiting = sum(1 for t in tick_times if wait_start <= t <= wait_end)
-        assert ticks_while_waiting > 0, "Event loop appeared to be blocked while waiting to acquire the lock"
+    async def test_async_lock_different_names_no_conflict(self, lock_name_factory: Callable[[], str]) -> None:
+        """Test that an async lock can be taken while an async lock with a different name is held"""
+        async with AsyncLock(lock_name_factory(), timeout=0):
+            # A new task, because the task that holds a lock may take it again
+            taken = await asyncio.create_task(_try_acquire_async(lock_name_factory()))
 
-    async def test_async_lock_different_names_no_conflict(self) -> None:
-        """Test that async locks with different names allow concurrent execution"""
-        both_holding = asyncio.Barrier(2)
-
-        async def acquire_lock(name: str) -> None:
-            async with AsyncLock(name):
-                await both_holding.wait()
-
-        # The barrier is reached only if both locks are held at the same time, however slowly each task starts
-        names = [f"async_lock_{i}_{uuid.uuid4()}" for i in range(2)]
-        await asyncio.wait_for(asyncio.gather(*[acquire_lock(name) for name in names]), timeout=BARRIER_TIMEOUT)
+        assert taken, "An async lock with a different name could not be taken while the first one was held"
 
     async def test_async_lock_reentrant_same_name(self) -> None:
         """Test that an async lock can be re-acquired within the same task without deadlocking."""
@@ -219,7 +207,7 @@ class TestAsyncLock:
                     pass
 
         # asyncio.wait_for raises TimeoutError if this deadlocks
-        await asyncio.wait_for(acquire_nested(), timeout=2.0)
+        await asyncio.wait_for(acquire_nested(), timeout=WAIT_TIMEOUT)
 
     async def test_async_lock_asyncio_lock_released_on_file_acquire_failure(self) -> None:
         """Test that the intra-process asyncio lock is released when the file lock acquisition fails."""
@@ -283,7 +271,7 @@ class TestAsyncLock:
                 async with lock:
                     pass
 
-        await asyncio.wait_for(acquire_nested(), timeout=2.0)
+        await asyncio.wait_for(acquire_nested(), timeout=WAIT_TIMEOUT)
         assert lock._asyncio_lock is None, "_asyncio_lock should be None after full release"
 
     async def test_async_reentrant_lock_acquire_without_task_raises(self, mocker: pytest.FixtureRequest) -> None:
@@ -362,3 +350,32 @@ class TestAsyncLock:
         t2.join()
 
         assert not errors, f"AsyncLock broke across event loops: {errors}"
+
+
+def _try_acquire(name: str) -> bool:
+    """Try to take the lock without waiting, and release it right away. Return whether it was taken"""
+    try:
+        with Lock(name, timeout=0):
+            return True
+    except Timeout:
+        return False
+
+
+def _try_acquire_in_another_thread(name: str) -> bool:
+    """Try to take the lock from a new thread without waiting. Return whether it was taken"""
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        return executor.submit(_try_acquire, name).result(timeout=WAIT_TIMEOUT)
+    finally:
+        executor.shutdown(wait=False)  # Do not wait for a worker that is stuck on the lock this thread holds
+
+
+async def _try_acquire_async(name: str) -> bool:
+    """Try to take the async lock without waiting for the file lock, and release it right away. Return whether it was
+    taken
+    """
+    try:
+        async with asyncio.timeout(WAIT_TIMEOUT), AsyncLock(name, timeout=0):
+            return True
+    except TimeoutError:  # The wait for the asyncio lock of this process ended, or the file lock is held elsewhere
+        return False

@@ -7,7 +7,7 @@ import docker
 import pytest
 from docker.errors import DockerException
 
-DOCKER_PING_TIMEOUT = 10
+DOCKER_PING_TIMEOUT = 60
 NOT_CI_VALUES = frozenset({"", "0", "false"})
 
 
@@ -17,7 +17,7 @@ def _require_docker() -> None:
     try:
         with closing(docker.from_env(timeout=DOCKER_PING_TIMEOUT)) as client:
             client.ping()
-    except DockerException as e:
+    except (DockerException, OSError) as e:
         reason = f"Docker is unreachable: {e}"
         if _is_ci():
             pytest.fail(f"{reason}. The integration tests must run on CI", pytrace=False)

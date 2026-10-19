@@ -171,14 +171,19 @@ class MockServerContainer(ServiceContainer):
             expectation["httpResponse"] = (responses or (MockResponse(),))[0].to_json()
         self._put("/expectation", json=expectation)
 
-    def expect_dropped_connection(self, path: str, *, method: str | None = None) -> None:
+    def expect_dropped_connection(self, path: str, *, method: str | None = None, times: int | None = None) -> None:
         """Close the connection without a response when a request matches
 
         :param path: The request path
         :param method: Only match this request method
+        :param times: Drop the connection for this many requests only, and let the next expectation that matches answer
+                      the ones after that. All the requests that match if not given
         """
         request = {"path": path} | ({"method": method} if method else {})
-        self._put("/expectation", json={"httpRequest": request, "httpError": {"dropConnection": True}})
+        expectation: dict[str, Any] = {"httpRequest": request, "httpError": {"dropConnection": True}}
+        if times is not None:
+            expectation["times"] = {"remainingTimes": times, "unlimited": False}
+        self._put("/expectation", json=expectation)
 
     def received(self, path: str) -> list[ReceivedRequest]:
         """Return the requests the mock server received for a path, in the order they arrived

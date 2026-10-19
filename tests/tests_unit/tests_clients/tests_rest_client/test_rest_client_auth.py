@@ -20,6 +20,8 @@ from common_libs.clients.rest_client.types import Request
 
 pytestmark = [pytest.mark.unittest]
 
+# Seconds a wait may take before the test gives up. A passing test never waits this long
+WAIT_TIMEOUT = 10.0
 BASE_URL = "https://example.com/v1"
 API_PATH = "/things"
 AUTH_LOGGER_NAME = "common_libs.clients.rest_client.auth"
@@ -92,10 +94,11 @@ class TestTokenProviderAuthExpiry:
         next(auth.sync_auth_flow(Request("GET", "http://example.com")))
         assert calls["n"] == 2
 
-    def test_short_lived_token_is_not_born_expired(self) -> None:
+    def test_short_lived_token_is_not_born_expired(self, mocker: MockFixture) -> None:
         """Test that a token whose expires_in is shorter than the leeway is still cached across calls instead of
         being treated as already expired the moment it is stored
         """
+        mocker.patch("time.monotonic", lambda: 0.0)
         calls = {"n": 0}
 
         def provider() -> Token:
@@ -476,7 +479,7 @@ class TestTokenProviderAuthReentrancy:
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
-        thread.join(timeout=5)
+        thread.join(timeout=WAIT_TIMEOUT)
         client.close()
 
         assert not thread.is_alive(), "the reentrant call hung"
@@ -500,7 +503,7 @@ class TestTokenProviderAuthReentrancy:
             client.auth = TokenProviderAuth(provider)
 
             with pytest.raises(TokenError) as exc_info:
-                await asyncio.wait_for(client.get(API_PATH, quiet=True), timeout=5)
+                await asyncio.wait_for(client.get(API_PATH, quiet=True), timeout=WAIT_TIMEOUT)
 
         assert "auth=None" in str(exc_info.value)
 
@@ -530,7 +533,7 @@ class TestTokenProviderAuthReentrancy:
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
-        thread.join(timeout=5)
+        thread.join(timeout=WAIT_TIMEOUT)
         client.close()
 
         assert not thread.is_alive(), "the reentrant call hung"
@@ -559,7 +562,7 @@ class TestTokenProviderAuthReentrancy:
 
             client.auth = TokenProviderAuth(provider)
 
-            r = await asyncio.wait_for(client.get(API_PATH, quiet=True), timeout=5)
+            r = await asyncio.wait_for(client.get(API_PATH, quiet=True), timeout=WAIT_TIMEOUT)
 
         assert r.status_code == 200
         assert seen_headers["login"] is None
@@ -1185,7 +1188,7 @@ class TestTokenProviderAuthConcurrency:
             return make_json_response(200, {"ok": True})
 
         async def provider() -> str:
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0)
             return "tok"
 
         auth = TokenProviderAuth(provider)
