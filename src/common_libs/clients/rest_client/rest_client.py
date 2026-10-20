@@ -257,7 +257,7 @@ class AsyncRestClient(RestClientBase):
     @asynccontextmanager
     async def http3(
         cls, base_url: str, *, verify: bool | str | os.PathLike[str] = True, **kwargs: Any
-    ) -> AsyncGenerator[AsyncRestClient]:
+    ) -> AsyncGenerator[Self]:
         """Async context manager that yields an AsyncRestClient connected over HTTP/3.
 
         This is experimental/temporary until the official HTTP/3 support is added to httpx2
