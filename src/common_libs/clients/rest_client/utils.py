@@ -29,7 +29,7 @@ TRUNCATE_LEN = 512
 ORIGINAL_REQUEST_ATTR = "_original_request"
 REQUEST_ID_HEADER = "X-Request-ID"
 SENSITIVE_NAMES_EXTENSION = "sensitive_names"
-SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS")
+SAFE_HTTP_METHODS = ("GET", "HEAD", "OPTIONS", "QUERY")
 _SENSITIVE_FIELD_NAMES = frozenset({"password", "token", "secret", "api_key", "apikey", "api-key"})
 _SENSITIVE_QUERY_NAMES = frozenset(
     {

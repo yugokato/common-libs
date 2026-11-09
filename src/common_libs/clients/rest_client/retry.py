@@ -100,7 +100,7 @@ class RetryPolicy:
     :param num_retries: Maximum number of retry attempts.
     :param retry_after: Seconds to wait before retrying, a callable that receives the response or
                         exception and returns the wait time, or a `BackoffStrategy` instance.
-    :param safe_methods_only: When `True`, only retries requests with safe HTTP methods (GET, HEAD, OPTIONS).
+    :param safe_methods_only: When `True`, only retries requests with safe HTTP methods (GET, HEAD, OPTIONS, QUERY).
     """
 
     condition: RetryCondition = 503
@@ -134,7 +134,7 @@ def retry_on(
                         same value as a callable `condition` would (see above). A `BackoffStrategy` instance is
                         also accepted — `as_callable()` is invoked per wrapped-function invocation so each
                         top-level call gets a fresh attempt counter.
-    :param safe_methods_only: Retry only for safe HTTP methods (GET/HEAD/OPTIONS). For exception-based retries,
+    :param safe_methods_only: Retry only for safe HTTP methods (GET/HEAD/OPTIONS/QUERY). For exception-based retries,
                               when the method cannot be determined (no request attached), the retry is skipped.
     :param _async_mode: Explicitly signal that the wrapped function executes async code
     """

@@ -79,6 +79,25 @@ class TestRetry:
 
         assert (response.status_code, len(mock_server.received(path))) == (status_code, attempts)
 
+    def test_query_is_retried_as_a_safe_method(
+        self,
+        client_factory: Callable[..., RestClient],
+        mock_server: MockServerContainer,
+        path: str,
+        fake_clock: FakeClock,
+    ) -> None:
+        """Test that a QUERY is retried by the default safe-methods-only policy, with the same JSON body each time"""
+        payload = {"name": "alice", "tags": [1, 2]}
+        mock_server.expect(path, SERVER_BUSY, SUCCESS)
+        client = client_factory(retry_policy=RetryPolicy(retry_after=RETRY_DELAY))
+
+        response = client.query(path, **payload)
+
+        attempts = [(request.method, request.body) for request in mock_server.received(path)]
+        assert response.status_code == 200
+        assert attempts == [("QUERY", payload)] * 2
+        assert fake_clock.sleeps == [RETRY_DELAY]
+
     def test_request_is_retried_after_the_connection_is_dropped(
         self, client_factory: Callable[..., RestClient], mock_server: MockServerContainer, path: str
     ) -> None:

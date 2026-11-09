@@ -107,6 +107,22 @@ class TestRestClient:
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
 
+    def test_query_call(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
+        """Test that query() sends a QUERY request with the payload as a JSON body and returns a RestResponse"""
+        client = RestClient("http://example.com")
+        mock_response = mock_response_factory()
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
+
+        r = client.query("/users/search", quiet=True, name="carol")
+
+        mock_httpx_request.assert_called_once()
+        sent = mock_httpx_request.call_args
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 200
+        assert sent.args[:2] == ("QUERY", "/users/search")
+        assert sent.kwargs["json"] == {"name": "carol"}
+        assert sent.kwargs["headers"]["Content-Type"] == "application/json"
+
     def test_stream_call(self, mock_stream_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
         """Test that stream() calls the underlying client.stream() context manager and yields a RestResponse"""
         client = RestClient("http://example.com")
@@ -266,6 +282,24 @@ class TestAsyncRestClient:
         mock_httpx_request.assert_called_once()
         assert isinstance(r, RestResponse)
         assert r.status_code == 200
+
+    async def test_query_call_async(self, mock_response_factory: Callable[..., MagicMock], mocker: MockFixture) -> None:
+        """Test that query() in async mode sends a QUERY request with the payload as a JSON body and returns a
+        RestResponse
+        """
+        client = AsyncRestClient("http://example.com")
+        mock_response = mock_response_factory()
+        mock_httpx_request = mocker.patch.object(client.client, "request", return_value=mock_response)
+
+        r = await client.query("/users/search", quiet=True, name="carol")
+
+        mock_httpx_request.assert_called_once()
+        sent = mock_httpx_request.call_args
+        assert isinstance(r, RestResponse)
+        assert r.status_code == 200
+        assert sent.args[:2] == ("QUERY", "/users/search")
+        assert sent.kwargs["json"] == {"name": "carol"}
+        assert sent.kwargs["headers"]["Content-Type"] == "application/json"
 
     async def test_stream_call_async(
         self, mock_stream_response_factory: Callable[..., MagicMock], mocker: MockFixture

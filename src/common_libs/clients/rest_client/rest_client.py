@@ -30,8 +30,8 @@ class RestClient(RestClientBase):
     """Sync Rest API client.
 
     `auth`, `files`, and `quiet` are reserved keywords on `get()`/`post()`/`put()`/`patch()`/`delete()`/
-    `options()`/`stream()`. A JSON payload or query parameter that happens to use one of those names cannot be
-    passed through `**payload`/`**query_params` on these methods.
+    `options()`/`query()`/`stream()`. A JSON payload or query parameter that happens to use one of those names
+    cannot be passed through `**payload`/`**query_params` on these methods.
     """
 
     def __init__(
@@ -169,6 +169,20 @@ class RestClient(RestClientBase):
         """
         return self._request("OPTIONS", path, params=query_params, auth=auth, quiet=quiet)
 
+    def query(
+        self, path: str, /, *, auth: RequestAuth = USE_CLIENT_DEFAULT, quiet: bool | None = None, **payload: Any
+    ) -> RestResponse:
+        """Make a QUERY API request
+
+        :param path: Endpoint path
+        :param auth: Auth to use for this call only. Defaults to the client's own auth. Pass `None` to send the
+                     request unauthenticated
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
+        :param payload: JSON payload that describes the query. A server rejects a QUERY without one
+        """
+        return self._request("QUERY", path, json=payload, auth=auth, quiet=quiet)
+
     @contextmanager
     @inject_hooks
     @manage_content_type
@@ -225,8 +239,8 @@ class AsyncRestClient(RestClientBase):
     """Async Rest API client.
 
     `auth`, `files`, and `quiet` are reserved keywords on `get()`/`post()`/`put()`/`patch()`/`delete()`/
-    `options()`/`stream()`. A JSON payload or query parameter that happens to use one of those names cannot be
-    passed through `**payload`/`**query_params` on these methods.
+    `options()`/`query()`/`stream()`. A JSON payload or query parameter that happens to use one of those names
+    cannot be passed through `**payload`/`**query_params` on these methods.
     """
 
     def __init__(
@@ -395,6 +409,20 @@ class AsyncRestClient(RestClientBase):
         :param query_params: Query parameters
         """
         return await self._request("OPTIONS", path, params=query_params, auth=auth, quiet=quiet)
+
+    async def query(
+        self, path: str, /, *, auth: RequestAuth = USE_CLIENT_DEFAULT, quiet: bool | None = None, **payload: Any
+    ) -> RestResponse:
+        """Make a QUERY API request
+
+        :param path: Endpoint path
+        :param auth: Auth to use for this call only. Defaults to the client's own auth. Pass `None` to send the
+                     request unauthenticated
+        :param quiet: Suppress request/response logs for this call (Failed calls are still logged with reduced context).
+                      Overrides the client's own `log_requests` default when given explicitly
+        :param payload: JSON payload that describes the query. A server rejects a QUERY without one
+        """
+        return await self._request("QUERY", path, json=payload, auth=auth, quiet=quiet)
 
     @asynccontextmanager
     @inject_hooks

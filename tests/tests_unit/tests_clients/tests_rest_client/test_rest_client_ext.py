@@ -588,10 +588,11 @@ class TestConnectionResetReconnect:
         err.__cause__ = cause
         return err
 
-    def test_sync_safe_method_reconnects_on_reset(self, mocker: MockFixture) -> None:
-        """Test that a safe-method (GET) request is automatically retried after a connection reset"""
+    @pytest.mark.parametrize("method", ["GET", "QUERY"])
+    def test_sync_safe_method_reconnects_on_reset(self, mocker: MockFixture, method: str) -> None:
+        """Test that a safe-method (GET, QUERY) request is automatically retried after a connection reset"""
         client = SyncHTTPClient(base_url="http://example.com")
-        request = client.build_request("GET", "/data")
+        request = client.build_request(method, "/data")
         mock_response = mocker.MagicMock()
         send_mock = mocker.patch.object(client, "_send", side_effect=[self._make_reset_error(), mock_response])
         mocker.patch("common_libs.clients.rest_client.ext.logger")
@@ -625,10 +626,11 @@ class TestConnectionResetReconnect:
 
         assert send_mock.call_count == 1
 
-    async def test_async_safe_method_reconnects_on_reset(self, mocker: MockFixture) -> None:
-        """Test that an async safe-method (GET) request is automatically retried after a connection reset"""
+    @pytest.mark.parametrize("method", ["GET", "QUERY"])
+    async def test_async_safe_method_reconnects_on_reset(self, mocker: MockFixture, method: str) -> None:
+        """Test that an async safe-method (GET, QUERY) request is automatically retried after a connection reset"""
         async with AsyncHTTPClient(base_url="http://example.com") as client:
-            request = client.build_request("GET", "/data")
+            request = client.build_request(method, "/data")
             mock_response = mocker.MagicMock()
             send_mock = mocker.patch.object(
                 client,

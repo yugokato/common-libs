@@ -657,12 +657,13 @@ class TestRetryOn:
         assert mock_logger.warning.call_count == 1
         assert "safe_methods_only" in mock_logger.warning.call_args[0][0]
 
+    @pytest.mark.parametrize("method", ["GET", "QUERY"])
     async def test_safe_methods_only_retries_on_exception_for_safe_method(
-        self, mock_response_factory: Callable[..., MagicMock], mode: str
+        self, mock_response_factory: Callable[..., MagicMock], mode: str, method: str
     ) -> None:
-        """Test that safe_methods_only=True allows exception retry for safe methods like GET"""
+        """Test that safe_methods_only=True allows exception retry for safe methods like GET and QUERY"""
         mock_request = MagicMock(spec=Request)
-        mock_request.method = "GET"
+        mock_request.method = method
         mock_request.request_id = "test-request-id"
         mock_ok = mock_response_factory(200)
         call_count = 0

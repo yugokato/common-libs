@@ -39,11 +39,11 @@ class TestRequests:
         assert (response.status_code, response.response) == (200, {"ok": True})
         assert (request.method, request.query) == (method.upper(), {"page": ["2"], "tag": ["a b"]})
 
-    @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+    @pytest.mark.parametrize("method", ["post", "put", "patch", "delete", "query"])
     def test_payload_is_sent_as_json(
         self, client_factory: Callable[..., RestClient], mock_server: MockServerContainer, path: str, method: str
     ) -> None:
-        """Test that the keyword arguments of post(), put(), patch() and delete() are sent as a JSON body"""
+        """Test that the keyword arguments of post(), put(), patch(), delete() and query() are sent as a JSON body"""
         mock_server.expect(path, MockResponse(status=201))
 
         response = getattr(client_factory(), method)(path, name="alice", tags=[1, 2])
